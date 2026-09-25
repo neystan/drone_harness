@@ -1,0 +1,27 @@
+name: real
+mode: real
+
+ros:
+  node_name: drone_agent_real
+  camera_scene_topic: /airsim_node/PX4/CameraDepth1/Scene
+
+storage:
+  photo_save_dir: /home/hw/picture_real
+  analysis_save_dir: /home/hw/picture_real/analysis_frames
+  log_dir: /home/hw/drone_agent_logs/real
+
+safety:
+  human_in_the_loop_for_flight_tools: true
+  human_in_the_loop_exempt_flight_tools:
+    - rotate
+    - land
+  max_takeoff_height_m: 3
+  max_relative_move_m: 5
+  max_vertical_move_m: 2
+  max_rotation_deg: 180
+  action_timeout_s: 20
+  hover_on_timeout: true
+  pre_takeoff_gate_enabled: true
+  require_battery_status_for_takeoff: true
+  min_battery_percent_for_takeoff: 30
+  require_px4_status_ready_for_takeoff: true

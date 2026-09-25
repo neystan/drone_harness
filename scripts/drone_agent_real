@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+"""直接启动真机模式的命令包装脚本。"""
+
+from drone_agent.cli import main_real
+
+
+if __name__ == "__main__":
+    raise SystemExit(main_real())

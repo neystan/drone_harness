@@ -1,0 +1,73 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test and coverage output
+tests/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Runtime logs and temporary outputs
+*.log
+tmp/
+temp/
+
+# Local environment and secrets
+.env
+.env.*
+settings.json
+
+# ROS and project runtime artifacts
+log/
+logs/
+install/
+drone_agent_runtime/
+runs/
+artifacts/
+datasets/
+sim_assets/
+*.db3
+*.mcap
+*.bag
+*.ulg
+*.tlog
+*.jsonl
+
+# Captured RGB-D frames and videos are runtime evidence, not source files
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tiff
+*.mp4
+*.mov
+*.avi
+
+# Local agent workspace artifacts
+.codex-backups/
+docs/superpowers/
