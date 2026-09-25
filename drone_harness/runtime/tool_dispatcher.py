@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import time
+from datetime import datetime
 from typing import Any
 
 from drone_harness.bus.intervention import interrupt_if_requested
@@ -16,6 +18,8 @@ from drone_harness.runtime.safety import (
 )
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.tools.registry import ToolContext, get_tool_definition
+from drone_harness.tools import flight
+from drone_harness.vision.depth_rules import compute_depth_rules
 
 
 def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
@@ -70,6 +74,13 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
         _update_task_state(context, "tool_finished", tool_name, result=result)
         return result
 
+    if tool_name == "forward":
+        precheck = flight.validate_forward(context, arguments.get("distance_m"))
+        if precheck is not None:
+            log_tool_call(context.profile, context.session_id, tool_name, arguments, precheck)
+            _update_task_state(context, "tool_finished", tool_name, result=precheck)
+            return precheck
+
     #用户输入介入
     result = interrupt_if_requested(context, hover_on_flight_tool=is_flight_tool)
     if result is not None:
@@ -78,7 +89,17 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
         raise EndCurrentTurn(result["message"], result)
 
     #要求用户确认
-    if requires_human_in_the_loop(context.profile, tool_name):
+    needs_confirmation = requires_human_in_the_loop(context.profile, tool_name)
+    if tool_name == "land" and not bool(getattr(context.task_state, "landing_authorized", False)):
+        needs_confirmation = True
+    if needs_confirmation:
+        initial_state = _approval_state(context)
+        if initial_state is None:
+            result = {"success": False, "error": "APPROVAL_OBSERVATION_INVALID",
+                      "message": "approval requires fresh RGB-D and flight state"}
+            log_tool_call(context.profile, context.session_id, tool_name, arguments, result)
+            _update_task_state(context, "tool_finished", tool_name, result=result)
+            return result
         _update_task_state(
             context,
             "waiting_for_confirmation",
@@ -97,6 +118,20 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
             log_tool_call(context.profile, context.session_id, tool_name, arguments, result)
             _update_task_state(context, "interrupted", tool_name, result=result)
             raise EndCurrentTurn(str(exc), result) from exc
+        if _approval_state(context) != initial_state:
+            result = {"success": False, "error": "APPROVAL_STATE_CHANGED",
+                      "message": "observation, limit or flight state changed during approval"}
+            log_tool_call(context.profile, context.session_id, tool_name, arguments, result)
+            _update_task_state(context, "tool_finished", tool_name, result=result)
+            return result
+        if tool_name == "land" and context.task_state is not None:
+            context.task_state.landing_authorized = True
+        if tool_name == "forward":
+            postcheck = flight.validate_forward(context, arguments.get("distance_m"))
+            if postcheck is not None:
+                log_tool_call(context.profile, context.session_id, tool_name, arguments, postcheck)
+                _update_task_state(context, "tool_finished", tool_name, result=postcheck)
+                return postcheck
 
     _update_task_state(
         context,
@@ -178,7 +213,7 @@ def _confirm_flight_tool(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> None:
-    """通过消息总线等待飞行工具人工确认。"""
+    """在观测有效期内通过消息总线等待逐动作人工确认。"""
     if context.message_bus is None:
         raise EndCurrentTurn(
             f"已取消本次 {tool_name} 执行。",
@@ -188,15 +223,34 @@ def _confirm_flight_tool(
                 "message": "message bus is unavailable for human-in-the-loop confirmation",
             },
         )
+    snapshot = context.observation
+    oldest_stamp_ns = min(snapshot.rgb_stamp_ns, snapshot.depth_stamp_ns or snapshot.rgb_stamp_ns)
+    expiry_ns = oldest_stamp_ns + int(context.profile.observation.max_frame_age_s * 1e9)
+    if tool_name == "forward":
+        limit = f"{context.depth_rules.forward_max_m:.2f}m"
+    elif tool_name == "takeoff":
+        limit = f"{context.profile.safety.max_takeoff_height_m:.2f}m"
+    elif tool_name == "rotate":
+        limit = f"{context.profile.safety.max_rotation_deg:.1f}deg"
+    else:
+        limit = "仅本次明确批准"
     prompt = (
-        f"human-in-the-loop> {tool_name} args={json.dumps(arguments, ensure_ascii=False)} "
+        f"human-in-the-loop> 动作={tool_name} 参数={json.dumps(arguments, ensure_ascii=False)} "
+        f"观测号={snapshot.observation_id} 上限={limit} "
+        f"有效期至={datetime.fromtimestamp(expiry_ns / 1e9).astimezone().isoformat(timespec='seconds')} "
         "| 执行该飞行动作？[Y/N]: "
     )
     print(prompt, flush=True)
-    while True:
-        answer = context.message_bus.consume_user_message().content.strip().lower()
+    while time.time_ns() <= expiry_ns:
+        response = context.message_bus.get_next_user_message()
+        if response is None:
+            time.sleep(0.05)
+            continue
+        answer = response.content.strip().lower()
         if answer == "y":
-            return
+            if time.time_ns() <= expiry_ns:
+                return
+            break
         if answer == "n":
             raise EndCurrentTurn(
                 f"已取消本次 {tool_name} 执行。",
@@ -207,6 +261,55 @@ def _confirm_flight_tool(
                 },
             )
         print("human-in-the-loop> 请输入 Y 或 N。")
+    raise EndCurrentTurn(
+        f"{tool_name} 人工确认已过有效期，未执行。",
+        {"success": False, "error": "HUMAN_IN_THE_LOOP_EXPIRED",
+         "message": "approval expired before confirmation"},
+    )
+
+
+def _approval_state(context: ToolContext) -> tuple[Any, ...] | None:
+    """捕获审批前后必须完全一致的观测号、限额及飞控状态。"""
+    snapshot = context.observation
+    rules = context.depth_rules
+    if snapshot is None or rules is None or rules.observation_id != snapshot.observation_id:
+        return None
+    age_ns = time.time_ns() - snapshot.rgb_stamp_ns
+    max_age_ns = int(context.profile.observation.max_frame_age_s * 1e9)
+    if not (-int(context.profile.observation.max_clock_skew_s * 1e9) <= age_ns <= max_age_ns):
+        return None
+    if snapshot.depth_stamp_ns is not None:
+        depth_age_ns = time.time_ns() - snapshot.depth_stamp_ns
+        if not (-int(context.profile.observation.max_clock_skew_s * 1e9) <= depth_age_ns <= max_age_ns):
+            return None
+    latest_observation = getattr(context.controller, "latest_observation", None)
+    latest = latest_observation() if latest_observation is not None else None
+    if latest is None or latest.observation_id != snapshot.observation_id:
+        return None
+    if not 0 <= time.monotonic_ns() - latest.received_monotonic_ns <= max_age_ns:
+        return None
+    if latest.pose_age_s is None or latest.pose_age_s > context.profile.observation.max_frame_age_s:
+        return None
+    latest_rules = compute_depth_rules(latest, context.profile.observation,
+                                       context.profile.safety.max_relative_move_m)
+    status = getattr(context.controller, "vehicle_status", None)
+    resolver = getattr(context.controller, "flight_state", None)
+    if status is None or resolver is None:
+        return None
+    return (
+        snapshot.observation_id,
+        snapshot.depth_stamp_ns,
+        latest.depth_stamp_ns,
+        rules.forward_max_m,
+        latest_rules.depth_valid,
+        latest_rules.forward_max_m,
+        latest_rules.reason,
+        context.profile.safety.max_relative_move_m,
+        bool(getattr(status, "connected", False)),
+        bool(getattr(status, "armed", False)),
+        getattr(status, "mode", None),
+        resolver(),
+    )
 
 
 def _record_task_state(context: ToolContext) -> None:

@@ -102,6 +102,8 @@ def _nav_state_constant(controller: Any, name: str, fallback: int) -> int:
 
 def requires_human_in_the_loop(profile: RuntimeProfile, tool_name: str) -> bool:
     """判断当前工具和模式是否需要人工确认后才能执行。"""
+    if getattr(profile, "mode", None) == "real":
+        return tool_name in FLIGHT_TOOL_NAMES
     if not profile.safety.human_in_the_loop_for_flight_tools:
         return False
     return (

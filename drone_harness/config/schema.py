@@ -201,18 +201,15 @@ class SafetyConfig:
     require_px4_status_ready_for_takeoff: bool
 
     def __post_init__(self) -> None:
-        """校验安全阈值是否为正数。"""
-        if self.max_takeoff_height_m <= 0:
-            raise ValueError("max_takeoff_height_m must be positive")
-        if self.max_relative_move_m <= 0:
-            raise ValueError("max_relative_move_m must be positive")
-        if self.max_vertical_move_m <= 0:
-            raise ValueError("max_vertical_move_m must be positive")
-        if self.max_rotation_deg <= 0:
-            raise ValueError("max_rotation_deg must be positive")
-        if self.action_timeout_s <= 0:
-            raise ValueError("action_timeout_s must be positive")
-        if not 0.0 <= self.min_battery_percent_for_takeoff <= 100.0:
+        """校验飞行阈值均为有限正数，避免 NaN 绕过限额。"""
+        for name in ("max_takeoff_height_m", "max_relative_move_m", "max_vertical_move_m",
+                     "max_rotation_deg", "action_timeout_s"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        if (isinstance(self.min_battery_percent_for_takeoff, bool)
+                or not math.isfinite(self.min_battery_percent_for_takeoff)
+                or not 0.0 <= self.min_battery_percent_for_takeoff <= 100.0):
             raise ValueError("min_battery_percent_for_takeoff must be within [0, 100]")
 
 

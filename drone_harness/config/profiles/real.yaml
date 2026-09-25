@@ -31,11 +31,9 @@ observation:
 
 safety:
   human_in_the_loop_for_flight_tools: true
-  human_in_the_loop_exempt_flight_tools:
-    - rotate
-    - land
+  human_in_the_loop_exempt_flight_tools: []
   max_takeoff_height_m: 3
-  max_relative_move_m: 5
+  max_relative_move_m: 0.2
   max_vertical_move_m: 2
   max_rotation_deg: 180
   action_timeout_s: 20

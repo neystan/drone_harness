@@ -49,13 +49,9 @@ def _takeoff_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     return flight.takeoff(context, arguments.get("height"))
 
 
-def _forward_handler(_context: ToolContext, _arguments: dict[str, Any]) -> dict:
-    """在 S5 安全门完成前拒绝一切自主前进。"""
-    return {
-        "success": False,
-        "error": "FEATURE_NOT_READY",
-        "message": "forward is disabled until the depth safety gate is implemented",
-    }
+def _forward_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
+    """仅通过程序深度安全门调用正向底层 move。"""
+    return flight.forward(context, arguments.get("distance_m"))
 
 
 def _rotate_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:

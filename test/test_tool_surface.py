@@ -26,13 +26,13 @@ def test_model_tool_surface_is_exactly_four_actions() -> None:
         assert get_tool_definition(removed) is None
 
 
-def test_forward_placeholder_issues_no_controller_command() -> None:
-    """深度门尚未完成时，前进占位动作必须零飞控调用。"""
+def test_forward_without_observation_issues_no_controller_command() -> None:
+    """没有同号深度规则时，前进安全门必须零飞控调用。"""
     controller = Mock()
     context = SimpleNamespace(controller=controller)
     result = get_tool_definition("forward").handler(context, {"distance_m": 0.2})
     assert result["success"] is False
-    assert result["error"] == "FEATURE_NOT_READY"
+    assert result["error"] == "FORWARD_OBSERVATION_MISSING"
     controller.assert_not_called()
     assert controller.method_calls == []
 
