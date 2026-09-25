@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from drone_agent.config.schema import SafetyConfig
-from drone_agent.runtime.safety import requires_human_in_the_loop
+from drone_harness.config.schema import SafetyConfig
+from drone_harness.runtime.safety import requires_human_in_the_loop
 
 
 def _profile(exempt_tools: frozenset[str]) -> SimpleNamespace:
@@ -31,7 +31,7 @@ def test_rotate_and_land_can_be_exempt_from_human_confirmation() -> None:
     assert not requires_human_in_the_loop(profile, "rotate")
     assert not requires_human_in_the_loop(profile, "land")
     assert requires_human_in_the_loop(profile, "takeoff")
-    assert requires_human_in_the_loop(profile, "move")
+    assert requires_human_in_the_loop(profile, "forward")
 
 
 def test_empty_exemption_list_keeps_flight_tools_confirmed() -> None:

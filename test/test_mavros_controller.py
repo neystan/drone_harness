@@ -72,8 +72,8 @@ def _install_ros_stubs() -> None:
 
 _install_ros_stubs()
 
-import drone_agent.px4.controller as controller_module
-from drone_agent.px4.controller import Px4Controller
+import drone_harness.px4.controller as controller_module
+from drone_harness.px4.controller import Px4Controller
 
 
 def test_ned_position_is_converted_to_mavros_enu() -> None:
@@ -151,7 +151,7 @@ def test_navigation_commands_use_mavlink_command_ack_operations() -> None:
 
 def test_sensor_subscriptions_use_sensor_data_qos() -> None:
     """验证 MAVROS 传感器订阅使用兼容 BEST_EFFORT 的 QoS。"""
-    controller_source = (Path(__file__).parents[1] / "drone_agent/px4/controller.py").read_text(
+    controller_source = (Path(__file__).parents[1] / "drone_harness/px4/controller.py").read_text(
         encoding="utf-8"
     )
 

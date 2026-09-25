@@ -1,81 +1,24 @@
-# drone_agent
+# drone_harness
 
-`drone_agent` 是一个使用 ROS2、MAVROS 和 PX4 的自然语言无人机控制 Agent。控制器继续使用原有路径 `drone_agent/px4/controller.py` 和类名 `Px4Controller`，不新增 `mavros/` 目录。
+`drone_harness` 是基于 ROS 2、MAVROS 与 PX4 的单目标 RGB-D 飞行闭环项目。它从原 `drone_agent` 工作副本受控迁移而来；原仓库保持只读。当前正在按 [设计规范](docs/drone_harness-Phase1-单目标飞行闭环-设计规范.md) 和 [详细实施文档](docs/drone_harness-Phase1-单目标飞行闭环-详细实施文档.md) 分阶段实现。
 
-## 安装与构建
+> S2 中间状态：旧检测、追踪和 skill 工具链已移除，`forward` 暂时拒绝执行。S3–S6 未完成前不要启动自主飞行入口；当前提交只用于离线测试。
 
-假设 ROS2 workspace 为 `~/hw-ros2/ros2`：
+## 包与入口
 
-```bash
-cd ~/hw-ros2/ros2
-colcon build --packages-select drone_agent
-source install/setup.bash
-```
+- Python/ROS 包：`drone_harness`
+- 仿真入口：`drone_harness_sim`
+- 真机入口：`drone_harness_real`（Phase 1 不进行真机自主飞行）
+- profile：`drone_harness/config/profiles/sim.yaml` 与 `real.yaml`
 
-运行前配置模型：
+示例设置见 `settings.example.json`。本地配置路径为 `~/.config/drone_harness/settings.json`，也可用 `DRONE_HARNESS_SETTINGS` 指向本地文件。API Key 不得提交到仓库。
 
-```bash
-mkdir -p ~/.config/drone_agent
-cp ~/hw-ros2/ros2/src/drone_agent/settings.example.json ~/.config/drone_agent/settings.json
-```
-
-然后在 `settings.json` 中填写 LLM/VLM 的 API 配置。
-
-## MAVROS 仿真流程
-
-启动 UE4/AirSim 场景后，在 WSL 中依次执行：
+## 离线检查
 
 ```bash
-cd ~/PX4-Autopilot
-make px4_sitl_default none_iris
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q
 ```
 
-另开终端单独启动 MAVROS：
+当前机器的系统 pytest 与自动加载的插件不兼容，故临时关闭插件自动加载。S1 的原样迁移基线为 27 通过、6 失败；这些失败来自旧飞行安全测试替身与现有 `flight_state()` 接口不匹配，后续安全阶段须保留等价断言并修复。
 
-```bash
-source /opt/ros/humble/setup.bash
-ros2 launch mavros px4.launch \
-  fcu_url:="udp://:14540@127.0.0.1:14580" \
-  tgt_system:=1 \
-  tgt_component:=1
-```
-
-再开终端启动 AirSim bridge 和 RGB 相机预览：
-
-```bash
-source /opt/ros/humble/setup.bash
-source ~/hw-ros2/ros2/install/setup.bash
-ros2 launch drone_agent takeoff_camera.launch.py
-```
-
-该 launch 只启动 AirSim bridge 和相机预览，并订阅 AirSim RGB topic：
-`/airsim_node/PX4/CameraDepth1/Scene`。不启动 MAVROS，也不再使用 `MicroXRCEAgent`。
-
-确认 MAVROS 已连接：
-
-```bash
-ros2 topic echo /mavros/state --once
-```
-
-最后启动 Agent：
-
-```bash
-drone_agent_sim
-```
-
-也可以使用 `ros2 run drone_agent drone_agent_sim` 启动。
-
-## 真机迁移
-
-真机通过 MAVROS 独立连接 PX4；`drone_agent_real` 不会启动 MAVROS、相机驱动或 AirSim。
-真机接入、相机 topic 配置、RTK/RC/failsafe 验收和首飞步骤见
-[`docs/REAL_VEHICLE_MIGRATION.md`](docs/REAL_VEHICLE_MIGRATION.md)。
-
-不要在真机上启动 `takeoff_camera.launch.py`，它仅用于 AirSim 仿真相机链路。
-
-## 目录
-
-- Python 主代码：`drone_agent/`
-- ROS2 包文件：`package.xml`、`setup.py`、`launch/`
-- 仿真配置：`drone_agent/config/profiles/sim.yaml`
-- 相机 topic：`/airsim_node/PX4/CameraDepth1/Scene`
+Phase 1 不把模型的“候选完成”当作真实到达，也不把前视相机当作全向避障证明。S7 仿真前须完成深度语义核对、保守标定与隔离运行环境预检。

@@ -1,0 +1,26 @@
+name: sim
+mode: simulation
+
+ros:
+  node_name: drone_harness_sim
+  camera_scene_topic: /airsim_node/PX4/CameraDepth1/Scene
+  mavros_namespace: /mavros
+  mavros_fcu_url: udp://:14540@127.0.0.1:14580
+
+storage:
+  photo_save_dir: /home/stan/AirVLN/drone_harness_runtime/picture
+  analysis_save_dir: /home/stan/AirVLN/drone_harness_runtime/picture/analysis_frames
+  log_dir: /home/stan/AirVLN/drone_harness_runtime/logs/sim
+
+safety:
+  human_in_the_loop_for_flight_tools: false
+  max_takeoff_height_m: 10
+  max_relative_move_m: 20
+  max_vertical_move_m: 10
+  max_rotation_deg: 360
+  action_timeout_s: 30
+  hover_on_timeout: true
+  pre_takeoff_gate_enabled: false
+  require_battery_status_for_takeoff: false
+  min_battery_percent_for_takeoff: 0
+  require_px4_status_ready_for_takeoff: false

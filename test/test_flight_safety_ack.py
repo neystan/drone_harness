@@ -83,10 +83,10 @@ def _install_ros_import_stubs() -> None:
 
 _install_ros_import_stubs()
 
-from drone_agent.px4.controller import CommandRequest, Px4Controller
-from drone_agent.runtime.safety import SafetyHandoffRequired
-from drone_agent.runtime.tool_dispatcher import _parse_tool_arguments
-from drone_agent.tools import flight
+from drone_harness.px4.controller import CommandRequest, Px4Controller
+from drone_harness.runtime.safety import SafetyHandoffRequired
+from drone_harness.runtime.tool_dispatcher import _parse_tool_arguments
+from drone_harness.tools import flight
 
 
 class FiniteInputTest(unittest.TestCase):
@@ -155,7 +155,7 @@ class CommandAckTest(unittest.TestCase):
     def test_hover_reports_state_unconfirmed_when_ack_is_accepted_but_mode_does_not_change(self) -> None:
         """验证 ACK 接受但模式未切换时返回状态未确认。"""
         context = _flight_context()
-        context.controller.uav_is_in_air = Mock(return_value=True)
+        context.controller.flight_state = Mock(return_value="IN_AIR")
         request = CommandRequest(command=176, ack_sequence_before=3)
         context.controller.send_hover_command = Mock(return_value=request)
         context.controller.wait_for_command_ack = Mock(return_value=SimpleNamespace(result=0))
@@ -170,7 +170,7 @@ class CommandAckTest(unittest.TestCase):
     def test_hover_reports_command_rejected(self) -> None:
         """验证 PX4 拒绝悬停命令时返回命令拒绝。"""
         context = _flight_context()
-        context.controller.uav_is_in_air = Mock(return_value=True)
+        context.controller.flight_state = Mock(return_value="IN_AIR")
         request = CommandRequest(command=176, ack_sequence_before=3)
         context.controller.send_hover_command = Mock(return_value=request)
         context.controller.wait_for_command_ack = Mock(
@@ -186,7 +186,7 @@ class CommandAckTest(unittest.TestCase):
     def test_hover_accepts_confirmed_state_when_ack_is_missing(self) -> None:
         """验证 ACK 丢失但 AUTO_LOITER 已确认时仍报告成功。"""
         context = _flight_context()
-        context.controller.uav_is_in_air = Mock(return_value=True)
+        context.controller.flight_state = Mock(return_value="IN_AIR")
         request = CommandRequest(command=176, ack_sequence_before=3)
         context.controller.send_hover_command = Mock(return_value=request)
         context.controller.wait_for_command_ack = Mock(return_value=None)
@@ -205,7 +205,7 @@ class TimeoutHandoffTest(unittest.TestCase):
         """验证动作超时且悬停确认后只返回超时并继续运行。"""
         context = _flight_context()
         controller = context.controller
-        controller.uav_is_in_air = Mock(return_value=True)
+        controller.flight_state = Mock(return_value="IN_AIR")
         controller.uav_position_is_valid = Mock(return_value=True)
         controller.vehicle_local_position.heading = 0.0
         controller.body_to_ned = Mock(return_value=(0.0, 0.0, 0.0))
@@ -246,7 +246,7 @@ class OffboardStartupTest(unittest.TestCase):
         """验证悬停未确认时停止 hold 并触发安全交接异常。"""
         context = _flight_context()
         controller = context.controller
-        controller.uav_is_in_air = Mock(return_value=True)
+        controller.flight_state = Mock(return_value="IN_AIR")
         controller.uav_position_is_valid = Mock(return_value=True)
         controller.vehicle_local_position.heading = 0.0
         controller.body_to_ned = Mock(return_value=(0.0, 0.0, 0.0))
@@ -278,8 +278,9 @@ def _flight_context() -> SimpleNamespace:
         battery_status=SimpleNamespace(remaining=1.0),
         timer_period=0.01,
         uav_position_is_valid=Mock(return_value=True),
-        uav_is_in_air=Mock(return_value=False),
+        flight_state=Mock(return_value="ON_GROUND"),
         is_at_target=Mock(return_value=False),
+        height_above_ground_m=Mock(return_value=1.0),
         current_position_ned=Mock(return_value=[0.0, 0.0, -1.0]),
         stop_position_hold=Mock(),
         get_logger=Mock(return_value=SimpleNamespace(info=Mock(), warn=Mock())),

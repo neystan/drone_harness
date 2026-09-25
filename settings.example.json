@@ -3,23 +3,5 @@
     "api_key": "replace-with-your-llm-key",
     "base_url": "replace-with-your-llm-base-url",
     "model": "replace-with-your-llm-model"
-  },
-  "vlm": {
-    "enabled": true,
-    "api_key": "replace-with-your-vlm-key",
-    "base_url": "replace-with-your-vlm-base-url",
-    "model": "replace-with-your-vlm-model"
-  },
-  "detector": {
-    "enabled": false,
-    "provider": "dinoxseek",
-    "api_key": "replace-with-your-dinoxseek-key",
-    "model": "DINO-XSeek-1.0",
-    "api_path": "/v2/task/dino_xseek/detection"
-  },
-  "tracker": {
-    "enabled": false,
-    "base_url": "http://127.0.0.1:8100",
-    "timeout_s": 5
   }
 }

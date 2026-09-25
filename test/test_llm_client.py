@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from drone_agent.llm.client import normalize_proxy_environment
+from drone_harness.llm.client import normalize_proxy_environment
 
 
 def test_normalize_proxy_environment_converts_legacy_socks_scheme() -> None:

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>drone_agent</name>
+  <name>drone_harness</name>
   <version>0.1.0</version>
-  <description>Natural-language UAV control agent based on ROS2, MAVROS, and PX4.</description>
+  <description>Single-target RGB-D UAV harness based on ROS2, MAVROS, and PX4.</description>
   <maintainer email="toplaya@126.com">hw</maintainer>
   <license>Proprietary</license>
 

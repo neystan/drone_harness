@@ -45,14 +45,14 @@ def _install_ros_stubs() -> None:
 
 _install_ros_stubs()
 
-from drone_agent.config.schema import RosConfig
-from drone_agent.runtime.runtime import _join_started_thread, controller_class_for_profile
+from drone_harness.config.schema import RosConfig
+from drone_harness.runtime.runtime import _join_started_thread, controller_class_for_profile
 
 
 def test_simulation_ros_profile_exposes_mavros_connection_settings() -> None:
     """验证仿真 profile 暴露 MAVROS namespace 和 FCU URL。"""
     config = RosConfig(
-        node_name="drone_agent_sim",
+        node_name="drone_harness_sim",
         camera_scene_topic="/camera",
         mavros_namespace="/mavros",
         mavros_fcu_url="udp://:14540@127.0.0.1:14580",
