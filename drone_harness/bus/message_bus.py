@@ -1,4 +1,4 @@
-"""定义 drone agent 的运行时消息总线。"""
+"""定义 drone_harness 的运行时消息总线。"""
 
 from __future__ import annotations
 

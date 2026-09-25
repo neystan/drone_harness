@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import math
 import threading
 import time
@@ -278,3 +279,31 @@ class ObservationBuffer:
             <= int(self.config.max_frame_age_s * 1_000_000_000)
             and 0 <= monotonic_age_ns <= int(self.config.max_frame_age_s * 1_000_000_000)
         )
+
+
+def build_observation_message(snapshot: ObservationSnapshot, rules: Any) -> dict[str, Any]:
+    """把同一观测的深度摘要与内存 JPEG 合成一条多模态消息。"""
+    if snapshot.rgb is None or snapshot.rgb.size == 0 or snapshot.rgb_stamp_ns <= 0:
+        raise ValueError("RGB observation is unavailable")
+    if rules.observation_id != snapshot.observation_id:
+        raise ValueError("depth rules do not match the RGB observation")
+    if snapshot.rgb.shape[0] * snapshot.rgb.shape[1] > 640 * 480 * 2:
+        raise ValueError("RGB observation exceeds image size limit")
+    import cv2
+
+    encoded_ok, encoded = cv2.imencode(".jpg", snapshot.rgb, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not encoded_ok or len(encoded) > 1_000_000:
+        raise ValueError("RGB JPEG encoding failed or exceeded byte limit")
+    data_url = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+    summary = (
+        f"新观测：observation_id={snapshot.observation_id}; "
+        f"rgb_stamp_ns={snapshot.rgb_stamp_ns}; {rules.as_text()}。"
+        "只依据这张 RGB 和同号深度规则决定至多一个动作。"
+    )
+    return {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": summary},
+            {"type": "image_url", "image_url": {"url": data_url, "detail": "low"}},
+        ],
+    }

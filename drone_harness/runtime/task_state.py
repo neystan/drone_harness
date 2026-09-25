@@ -26,6 +26,12 @@ class TaskState:
     last_tool_name: str | None = None
     last_tool_result: dict[str, Any] | None = None
     last_error: str | None = None
+    observation_id: str | None = None
+    step_id: int = 0
+    consecutive_rejections: int = 0
+    consecutive_no_progress: int = 0
+    landing_authorized: bool = False
+    completion_candidate: str | None = None
 
     def start_new_goal(self, user_input: str) -> None:
         """在用户输入新任务后刷新当前目标状态。"""
@@ -40,6 +46,12 @@ class TaskState:
         self.last_tool_name = None
         self.last_tool_result = None
         self.last_error = None
+        self.observation_id = None
+        self.step_id = 0
+        self.consecutive_rejections = 0
+        self.consecutive_no_progress = 0
+        self.landing_authorized = False
+        self.completion_candidate = None
 
     def set_thinking(self) -> None:
         """标记当前轮进入模型思考阶段。"""
@@ -92,6 +104,8 @@ class TaskState:
         self.current_phase = "tool_completed" if result.get("success") else "tool_failed"
         self.last_tool_name = tool_name
         self.last_tool_result = result
+        self.step_id += 1
+        self.consecutive_rejections = 0 if result.get("success") else self.consecutive_rejections + 1
         self.last_error = None if result.get("success") else str(result.get("error") or "")
         self.active_tool_name = None
         self.active_tool_arguments = None
@@ -100,9 +114,13 @@ class TaskState:
 
     def interrupt(self, tool_name: str, result: dict[str, Any]) -> None:
         """标记当前轮因拒绝、超时等原因被中断。"""
+        already_recorded = self.last_tool_result is result
         self.current_phase = "interrupted"
         self.last_tool_name = tool_name
         self.last_tool_result = result
+        if not already_recorded:
+            self.step_id += 1
+            self.consecutive_rejections += 1
         self.last_error = str(result.get("error") or "")
         if result.get("intervention_message"):
             self.intervention_pending = True
@@ -123,6 +141,25 @@ class TaskState:
         """清空已经交给 LLM 处理的介入状态。"""
         self.intervention_pending = False
         self.intervention_message = None
+
+    def set_observation(self, observation_id: str) -> None:
+        """记录本轮用于规划和安全核对的观测号。"""
+        self.observation_id = observation_id
+
+    def record_motion_progress(
+        self,
+        tool_name: str,
+        before_ned: tuple[float, float, float] | None,
+        after_ned: tuple[float, float, float] | None,
+    ) -> None:
+        """用前后位姿更新平移进展计数，不以模型自评代替测量。"""
+        if tool_name not in {"takeoff", "forward"}:
+            return
+        if before_ned is None or after_ned is None:
+            self.consecutive_no_progress += 1
+            return
+        distance_sq = sum((new - old) ** 2 for old, new in zip(before_ned, after_ned))
+        self.consecutive_no_progress = 0 if distance_sq >= 0.05 ** 2 else self.consecutive_no_progress + 1
 
     def snapshot(self) -> dict[str, Any]:
         """导出当前状态快照，供日志记录使用。"""

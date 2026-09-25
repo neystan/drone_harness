@@ -1,4 +1,4 @@
-"""负责为 drone agent 打开独立输入终端。"""
+"""负责为 drone_harness 打开独立输入终端。"""
 
 from __future__ import annotations
 

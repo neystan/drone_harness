@@ -7,7 +7,9 @@ from typing import Any, Callable
 
 from drone_harness.bus import MessageBus
 from drone_harness.config.schema import RuntimeProfile
+from drone_harness.runtime.observation import ObservationSnapshot
 from drone_harness.runtime.task_state import TaskState
+from drone_harness.vision.depth_rules import DepthRules
 from . import flight
 from .schemas import (
     FORWARD_TOOL_SCHEMA,
@@ -20,7 +22,7 @@ from .schemas import (
 ToolHandler = Callable[["ToolContext", dict[str, Any]], dict[str, Any]]
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolContext:
     """汇集一次工具执行所需的控制器、配置和会话状态。"""
 
@@ -29,6 +31,8 @@ class ToolContext:
     session_id: str = "adhoc"
     task_state: TaskState | None = None
     message_bus: MessageBus | None = None
+    observation: ObservationSnapshot | None = None
+    depth_rules: DepthRules | None = None
 
 
 @dataclass(frozen=True)

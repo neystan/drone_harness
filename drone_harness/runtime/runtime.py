@@ -1,4 +1,4 @@
-"""创建并启动 drone agent 运行时。"""
+"""创建并启动 drone_harness 运行时。"""
 
 from __future__ import annotations
 
@@ -146,7 +146,6 @@ def _run_interactive_loop(
 ) -> None:
     """运行命令行交互循环，并把每轮输入交给 agent loop。"""
     _configure_readline()
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if input_terminal_started:
         print("输入终端已打开；当前终端只显示 agent、tool、ROS2 消息。")
         print("请在输入终端输入自然语言或 HITL 确认，输入 exit 退出。")
@@ -170,8 +169,21 @@ def _run_interactive_loop(
             break
         if context.task_state is not None:
             context.task_state.start_new_goal(user_input)
+        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.append({"role": "user", "content": user_input})
         log_agent_message(context.profile, context.session_id, "user", user_input)
+        wait_for_observation = getattr(context.controller, "wait_for_observation", None)
+        snapshot = wait_for_observation() if wait_for_observation is not None else None
+        if snapshot is None:
+            print("agent> 当前没有可用的前视 RGB，未请求模型。")
+            continue
+        from drone_harness.runtime.agent_loop import append_observation
+
+        try:
+            append_observation(context, messages, snapshot)
+        except ValueError as exc:
+            print(f"agent> 观测不可用，未请求模型：{exc}")
+            continue
         agent_loop(client, model, messages, context)
 
 

@@ -100,8 +100,42 @@ def log_task_state(
         "intervention_message": snapshot["intervention_message"],
         "last_tool_name": snapshot["last_tool_name"],
         "last_error": snapshot["last_error"],
+        "observation_id": snapshot["observation_id"],
+        "step_id": snapshot["step_id"],
+        "consecutive_rejections": snapshot["consecutive_rejections"],
+        "consecutive_no_progress": snapshot["consecutive_no_progress"],
+        "landing_authorized": snapshot["landing_authorized"],
+        "completion_candidate": snapshot["completion_candidate"],
     }
     try:
         append_jsonl(str(_session_log_dir(profile, session_id)), "task_state.jsonl", event)
+    except OSError:
+        pass
+
+
+def log_observation(
+    profile: RuntimeProfile,
+    session_id: str,
+    observation_id: str,
+    rgb_stamp_ns: int,
+    depth_stamp_ns: int | None,
+    depth_valid: bool,
+    forward_max_m: float,
+    reason: str,
+) -> None:
+    """只记录观测元数据，不把原始图片或 base64 写入日志。"""
+    event = {
+        "timestamp": _timestamp(),
+        "profile_name": profile.name,
+        "event_type": "observation",
+        "observation_id": observation_id,
+        "rgb_stamp_ns": rgb_stamp_ns,
+        "depth_stamp_ns": depth_stamp_ns,
+        "depth_valid": depth_valid,
+        "forward_max_m": forward_max_m,
+        "reason": reason,
+    }
+    try:
+        append_jsonl(str(_session_log_dir(profile, session_id)), "observations.jsonl", event)
     except OSError:
         pass
