@@ -35,6 +35,7 @@ def _install_ros_stubs() -> None:
         sensor_msgs_msg = types.ModuleType("sensor_msgs.msg")
         sensor_msgs_msg.BatteryState = type("BatteryState", (), {})
         sensor_msgs_msg.Image = type("Image", (), {})
+        sensor_msgs_msg.CameraInfo = type("CameraInfo", (), {})
         sys.modules["sensor_msgs"] = sensor_msgs
         sys.modules["sensor_msgs.msg"] = sensor_msgs_msg
 

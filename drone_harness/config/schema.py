@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -11,6 +12,8 @@ class RosConfig:
 
     node_name: str
     camera_scene_topic: str | None
+    camera_depth_topic: str | None = None
+    camera_depth_info_topic: str | None = None
     mavros_namespace: str = "/mavros"
     mavros_fcu_url: str = ""
 
@@ -20,6 +23,10 @@ class RosConfig:
             raise ValueError("ros.node_name is required")
         if not self.mavros_namespace:
             raise ValueError("ros.mavros_namespace is required")
+        if bool(self.camera_depth_topic) != bool(self.camera_depth_info_topic):
+            raise ValueError("depth image and camera_info topics must be configured together")
+        if self.camera_depth_topic and not self.camera_scene_topic:
+            raise ValueError("RGB topic is required when depth topic is configured")
 
 
 @dataclass(frozen=True)
@@ -38,6 +45,59 @@ class StorageConfig:
             raise ValueError("storage.analysis_save_dir is required")
         if not self.log_dir:
             raise ValueError("storage.log_dir is required")
+
+
+@dataclass(frozen=True)
+class ObservationConfig:
+    """规定 RGB-D 同步、相机几何及保守前进余量。"""
+
+    max_frame_age_s: float
+    max_sync_delta_s: float
+    max_clock_skew_s: float
+    wait_timeout_s: float
+    depth_semantics: str
+    depth_max_m: float
+    camera_forward_offset_m: float
+    body_front_offset_m: float
+    body_half_width_m: float
+    body_half_height_m: float
+    measurement_margin_m: float
+    braking_margin_m: float
+    latency_margin_m: float
+    coverage_min_fraction: float
+    side_obstacle_distance_m: float
+
+    def __post_init__(self) -> None:
+        """拒绝非有限阈值及未经声明的深度语义。"""
+        positive_fields = (
+            "max_frame_age_s",
+            "max_sync_delta_s",
+            "max_clock_skew_s",
+            "wait_timeout_s",
+            "depth_max_m",
+            "body_front_offset_m",
+            "body_half_width_m",
+            "body_half_height_m",
+            "side_obstacle_distance_m",
+        )
+        nonnegative_fields = (
+            "camera_forward_offset_m",
+            "measurement_margin_m",
+            "braking_margin_m",
+            "latency_margin_m",
+        )
+        for name in positive_fields:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"observation.{name} must be finite and positive")
+        for name in nonnegative_fields:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"observation.{name} must be finite and nonnegative")
+        if not math.isfinite(self.coverage_min_fraction) or not 0 < self.coverage_min_fraction <= 1:
+            raise ValueError("observation.coverage_min_fraction must be in (0, 1]")
+        if self.depth_semantics not in {"perspective_ray_m", "unverified"}:
+            raise ValueError("observation.depth_semantics is unsupported")
 
 
 @dataclass(frozen=True)
@@ -164,6 +224,7 @@ class RuntimeProfile:
     mode: str
     ros: RosConfig
     storage: StorageConfig
+    observation: ObservationConfig
     llm: ProviderConfig
     vlm: VlmConfig
     detector: DetectorConfig

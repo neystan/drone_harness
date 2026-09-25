@@ -4,6 +4,8 @@ mode: simulation
 ros:
   node_name: drone_harness_sim
   camera_scene_topic: /airsim_node/PX4/CameraDepth1/Scene
+  camera_depth_topic: /airsim_node/PX4/CameraDepth1/DepthPerspective
+  camera_depth_info_topic: /airsim_node/PX4/CameraDepth1/DepthPerspective/camera_info
   mavros_namespace: /mavros
   mavros_fcu_url: udp://:14540@127.0.0.1:14580
 
@@ -12,10 +14,28 @@ storage:
   analysis_save_dir: /home/stan/AirVLN/drone_harness_runtime/picture/analysis_frames
   log_dir: /home/stan/AirVLN/drone_harness_runtime/logs/sim
 
+observation:
+  max_frame_age_s: 1.0
+  max_sync_delta_s: 0.05
+  max_clock_skew_s: 0.05
+  wait_timeout_s: 2.0
+  depth_semantics: perspective_ray_m
+  depth_max_m: 20.0
+  camera_forward_offset_m: 0.5
+  body_front_offset_m: 0.55
+  body_half_width_m: 0.45
+  body_half_height_m: 0.30
+  measurement_margin_m: 0.15
+  # 制动/超调尚未标定；此暂定值大于最大深度，保证自主前进上限为零。
+  braking_margin_m: 25.0
+  latency_margin_m: 0.25
+  coverage_min_fraction: 1.0
+  side_obstacle_distance_m: 2.0
+
 safety:
   human_in_the_loop_for_flight_tools: false
   max_takeoff_height_m: 10
-  max_relative_move_m: 20
+  max_relative_move_m: 0.3
   max_vertical_move_m: 10
   max_rotation_deg: 360
   action_timeout_s: 30

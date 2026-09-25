@@ -26,6 +26,7 @@ def _install_ros_stubs() -> None:
     sensor_msgs_msg = types.ModuleType("sensor_msgs.msg")
     sensor_msgs_msg.BatteryState = type("BatteryState", (), {})
     sensor_msgs_msg.Image = type("Image", (), {})
+    sensor_msgs_msg.CameraInfo = type("CameraInfo", (), {})
     sys.modules.setdefault("sensor_msgs", sensor_msgs)
     sys.modules.setdefault("sensor_msgs.msg", sensor_msgs_msg)
     mavros_msgs = types.ModuleType("mavros_msgs")

@@ -11,6 +11,7 @@ import yaml
 
 from drone_harness.config.schema import (
     DetectorConfig,
+    ObservationConfig,
     ProviderConfig,
     RosConfig,
     RuntimeProfile,
@@ -96,6 +97,7 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
     """把原始字典转换成经过校验的 RuntimeProfile。"""
     ros = raw["ros"]
     storage = raw["storage"]
+    observation = raw["observation"]
     safety = raw["safety"]
     llm_settings = settings.get("llm", {})
     vlm_settings = settings.get("vlm", {})
@@ -158,6 +160,8 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
         ros=RosConfig(
             node_name=str(ros["node_name"]),
             camera_scene_topic=ros.get("camera_scene_topic"),
+            camera_depth_topic=ros.get("camera_depth_topic"),
+            camera_depth_info_topic=ros.get("camera_depth_info_topic"),
             mavros_namespace=str(ros.get("mavros_namespace", "/mavros")),
             mavros_fcu_url=str(ros.get("mavros_fcu_url", "")).strip(),
         ),
@@ -165,6 +169,23 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
             photo_save_dir=str(storage["photo_save_dir"]),
             analysis_save_dir=str(storage["analysis_save_dir"]),
             log_dir=str(storage["log_dir"]),
+        ),
+        observation=ObservationConfig(
+            max_frame_age_s=float(observation["max_frame_age_s"]),
+            max_sync_delta_s=float(observation["max_sync_delta_s"]),
+            max_clock_skew_s=float(observation["max_clock_skew_s"]),
+            wait_timeout_s=float(observation["wait_timeout_s"]),
+            depth_semantics=str(observation["depth_semantics"]),
+            depth_max_m=float(observation["depth_max_m"]),
+            camera_forward_offset_m=float(observation["camera_forward_offset_m"]),
+            body_front_offset_m=float(observation["body_front_offset_m"]),
+            body_half_width_m=float(observation["body_half_width_m"]),
+            body_half_height_m=float(observation["body_half_height_m"]),
+            measurement_margin_m=float(observation["measurement_margin_m"]),
+            braking_margin_m=float(observation["braking_margin_m"]),
+            latency_margin_m=float(observation["latency_margin_m"]),
+            coverage_min_fraction=float(observation["coverage_min_fraction"]),
+            side_obstacle_distance_m=float(observation["side_obstacle_distance_m"]),
         ),
         llm=ProviderConfig(
             base_url=llm_base_url,

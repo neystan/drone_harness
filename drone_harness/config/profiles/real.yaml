@@ -4,11 +4,30 @@ mode: real
 ros:
   node_name: drone_harness_real
   camera_scene_topic: null
+  camera_depth_topic: null
+  camera_depth_info_topic: null
 
 storage:
   photo_save_dir: /home/hw/picture_real
   analysis_save_dir: /home/hw/picture_real/analysis_frames
   log_dir: /home/hw/drone_harness_logs/real
+
+observation:
+  max_frame_age_s: 0.5
+  max_sync_delta_s: 0.05
+  max_clock_skew_s: 0.05
+  wait_timeout_s: 2.0
+  depth_semantics: unverified
+  depth_max_m: 20.0
+  camera_forward_offset_m: 0.0
+  body_front_offset_m: 0.55
+  body_half_width_m: 0.45
+  body_half_height_m: 0.30
+  measurement_margin_m: 0.15
+  braking_margin_m: 25.0
+  latency_margin_m: 0.25
+  coverage_min_fraction: 1.0
+  side_obstacle_distance_m: 2.0
 
 safety:
   human_in_the_loop_for_flight_tools: true

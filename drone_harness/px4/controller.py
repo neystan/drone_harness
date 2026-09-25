@@ -6,7 +6,7 @@ import math
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from cv_bridge import CvBridge
@@ -16,9 +16,11 @@ from mavros_msgs.srv import CommandBool, CommandLong, SetMode
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import BatteryState as MavrosBatteryState
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo, Image
 
+from drone_harness.config.schema import ObservationConfig
 from drone_harness.px4.frame import body_to_ned, is_finite_number, normalize_angle
+from drone_harness.runtime.observation import CameraIntrinsics, ObservationBuffer, ObservationSnapshot, ros_stamp_ns
 
 
 DEFAULT_POSITION_TOLERANCE_M = 0.3
@@ -112,6 +114,9 @@ class Px4Controller(Node):
         node_name: str,
         camera_scene_topic: str | None = None,
         mavros_namespace: str = "/mavros",
+        camera_depth_topic: str | None = None,
+        camera_depth_info_topic: str | None = None,
+        observation_config: ObservationConfig | None = None,
     ) -> None:
         """初始化 MAVROS topic、service、状态缓存和 setpoint 定时器。"""
         super().__init__(node_name)
@@ -127,6 +132,7 @@ class Px4Controller(Node):
         self.vehicle_status_received = False
         self.battery_status_received = False
         self.pose_received = False
+        self.pose_received_monotonic_ns: int | None = None
         self.extended_state_received = False
         self.ground_z_ned: float | None = None
         self.vehicle_command_ack = None
@@ -135,6 +141,7 @@ class Px4Controller(Node):
         self._vehicle_command_ack_lock = threading.Lock()
         self.bridge = CvBridge()
         self.latest_rgb_frame = None
+        self.observation_buffer = ObservationBuffer(observation_config) if observation_config is not None else None
         self.latest_statustext = None
 
         self.setpoint_publisher = self.create_publisher(
@@ -177,6 +184,20 @@ class Px4Controller(Node):
                 Image,
                 camera_scene_topic,
                 self.rgb_image_callback,
+                qos_profile_sensor_data,
+            )
+        if camera_depth_topic:
+            self.create_subscription(
+                Image,
+                camera_depth_topic,
+                self.depth_image_callback,
+                qos_profile_sensor_data,
+            )
+        if camera_depth_info_topic:
+            self.create_subscription(
+                CameraInfo,
+                camera_depth_info_topic,
+                self.depth_camera_info_callback,
                 qos_profile_sensor_data,
             )
 
@@ -259,6 +280,7 @@ class Px4Controller(Node):
             z_valid=True,
         )
         self.pose_received = True
+        self.pose_received_monotonic_ns = time.monotonic_ns()
         self._capture_ground_z_if_ready()
 
     def battery_status_callback(self, msg: MavrosBatteryState) -> None:
@@ -323,11 +345,76 @@ class Px4Controller(Node):
         return ground_z_ned - target_z
 
     def rgb_image_callback(self, msg: Image) -> None:
-        """把 RGB 图像消息转换为 OpenCV 帧并缓存。"""
+        """把 RGB 图像消息转换并连同采集时间缓存。"""
         try:
             self.latest_rgb_frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            if self.observation_buffer is not None:
+                self.observation_buffer.add_rgb(
+                    self.latest_rgb_frame,
+                    ros_stamp_ns(msg.header.stamp),
+                    str(msg.header.frame_id),
+                )
         except Exception as exc:
             self.get_logger().error(f"Failed to convert RGB image: {exc}")
+
+    def depth_image_callback(self, msg: Image) -> None:
+        """只解码并缓存原始深度图，不在 ROS 回调里做几何计算。"""
+        if self.observation_buffer is None:
+            return
+        try:
+            depth = self.bridge.imgmsg_to_cv2(msg, "passthrough")
+            self.observation_buffer.add_depth(
+                depth,
+                ros_stamp_ns(msg.header.stamp),
+                str(msg.encoding),
+                str(msg.header.frame_id),
+            )
+        except Exception as exc:
+            self.get_logger().error(f"Failed to convert depth image: {exc}")
+
+    def depth_camera_info_callback(self, msg: CameraInfo) -> None:
+        """校验并缓存与深度图同源的针孔内参。"""
+        if self.observation_buffer is None:
+            return
+        try:
+            self.observation_buffer.add_camera_info(CameraIntrinsics.from_ros_message(msg))
+        except Exception as exc:
+            self.get_logger().error(f"Failed to read depth camera info: {exc}")
+
+    def latest_observation(self, after_stamp_ns: int = 0) -> ObservationSnapshot | None:
+        """读取最新观测并附上位姿及状态，供规划与安全门复用。"""
+        if self.observation_buffer is None:
+            return None
+        snapshot = self.observation_buffer.latest_snapshot(after_stamp_ns)
+        return self._attach_flight_state(snapshot)
+
+    def wait_for_observation(
+        self,
+        after_stamp_ns: int = 0,
+        timeout_s: float | None = None,
+    ) -> ObservationSnapshot | None:
+        """等待动作后采集的新观测，保持 setpoint 定时器独立运行。"""
+        if self.observation_buffer is None:
+            return None
+        snapshot = self.observation_buffer.wait_for_snapshot(after_stamp_ns, timeout_s)
+        return self._attach_flight_state(snapshot)
+
+    def _attach_flight_state(self, snapshot: ObservationSnapshot | None) -> ObservationSnapshot | None:
+        """为快照补充当前 NED 位姿、飞行状态与位姿龄。"""
+        if snapshot is None:
+            return None
+        pose = self.vehicle_local_position
+        pose_ned = None
+        if self.pose_received and all(math.isfinite(value) for value in (pose.x, pose.y, pose.z)):
+            pose_ned = (pose.x, pose.y, pose.z)
+        received_ns = self.pose_received_monotonic_ns
+        pose_age_s = None if received_ns is None else max(0.0, (time.monotonic_ns() - received_ns) / 1e9)
+        return replace(
+            snapshot,
+            pose_ned=pose_ned,
+            flight_state=self.flight_state(),
+            pose_age_s=pose_age_s,
+        )
 
     def nav_state_constant(self, name: str, fallback: int) -> int:
         """返回与现有 PX4 工具兼容的导航状态常量。"""
