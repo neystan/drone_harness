@@ -1,7 +1,7 @@
 {
   "llm": {
     "api_key": "replace-with-your-llm-key",
-    "base_url": "replace-with-your-llm-base-url",
-    "model": "replace-with-your-llm-model"
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    "model": "glm-5.3-flash"
   }
 }

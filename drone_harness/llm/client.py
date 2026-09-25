@@ -1,4 +1,4 @@
-"""创建 OpenAI-compatible 文本模型客户端。"""
+"""创建唯一 OpenAI-compatible 多模态 VLM 客户端。"""
 
 from __future__ import annotations
 
@@ -31,11 +31,20 @@ def normalize_proxy_environment(
 
 
 def create_llm_client(profile: RuntimeProfile) -> Any:
-    """根据 profile 创建文本模型客户端。"""
+    """根据单一模型配置创建支持图片与工具调用的客户端。"""
     normalize_proxy_environment()
     from openai import OpenAI
 
     return OpenAI(
         api_key=profile.llm.api_key,
-        base_url=profile.llm.base_url,
+        base_url=normalize_chat_base_url(profile.llm.base_url),
+        timeout=20.0,
+        max_retries=0,
     )
+
+
+def normalize_chat_base_url(url: str) -> str:
+    """兼容用户给出的完整 chat/completions 地址与 SDK 基础路径。"""
+    normalized = url.rstrip("/")
+    suffix = "/chat/completions"
+    return normalized[:-len(suffix)] if normalized.endswith(suffix) else normalized

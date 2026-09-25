@@ -102,85 +102,20 @@ class ObservationConfig:
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    """文本模型提供方配置。"""
+    """单一多模态 VLM 提供方配置。"""
 
     base_url: str
     model: str
     api_key: str
 
     def __post_init__(self) -> None:
-        """校验文本模型配置与密钥是否可用。"""
+        """校验唯一 VLM 的接口、型号和密钥。"""
         if not self.base_url:
             raise ValueError("provider base_url is required")
         if not self.model:
             raise ValueError("provider model is required")
         if not self.api_key:
             raise ValueError("provider api_key is required")
-
-
-@dataclass(frozen=True)
-class VlmConfig:
-    """视觉模型提供方配置。"""
-
-    enabled: bool
-    base_url: str | None
-    model: str | None
-    api_key: str | None
-
-    def __post_init__(self) -> None:
-        """在启用视觉模型时校验相关字段。"""
-        if not self.enabled:
-            return
-        if not self.base_url:
-            raise ValueError("vlm.base_url is required when vlm.enabled=true")
-        if not self.model:
-            raise ValueError("vlm.model is required when vlm.enabled=true")
-        if not self.api_key:
-            raise ValueError("vlm.api_key is required when vlm.enabled=true")
-
-
-@dataclass(frozen=True)
-class DetectorConfig:
-    """语义检测模型配置。"""
-
-    enabled: bool
-    provider: str | None
-    api_key: str | None
-    model: str | None
-    api_path: str | None
-
-    def __post_init__(self) -> None:
-        """在启用检测器时校验 DINO-XSEEK 配置。"""
-        if not self.enabled:
-            return
-        if self.provider != "dinoxseek":
-            raise ValueError(
-                "detector.provider must be 'dinoxseek' when detector.enabled=true"
-            )
-        if not self.api_key:
-            raise ValueError("detector.api_key is required when detector.enabled=true")
-        if not self.model:
-            raise ValueError("detector.model is required when detector.enabled=true")
-        if not self.api_path:
-            raise ValueError("detector.api_path is required when detector.enabled=true")
-
-
-@dataclass(frozen=True)
-class TrackerConfig:
-    """SAM2 目标跟踪服务配置。"""
-
-    enabled: bool
-    base_url: str | None
-    timeout_s: float
-
-    def __post_init__(self) -> None:
-        """在启用追踪服务时校验 Docker 服务地址。"""
-        if not self.enabled:
-            return
-        if not self.base_url:
-            raise ValueError("tracker.base_url is required when tracker.enabled=true")
-        if self.timeout_s <= 0:
-            raise ValueError("tracker.timeout_s must be positive")
 
 
 @dataclass(frozen=True)
@@ -223,9 +158,6 @@ class RuntimeProfile:
     storage: StorageConfig
     observation: ObservationConfig
     llm: ProviderConfig
-    vlm: VlmConfig
-    detector: DetectorConfig
-    tracker: TrackerConfig
     safety: SafetyConfig
 
     def __post_init__(self) -> None:

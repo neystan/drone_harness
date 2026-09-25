@@ -10,15 +10,12 @@ from typing import Any
 import yaml
 
 from drone_harness.config.schema import (
-    DetectorConfig,
     ObservationConfig,
     ProviderConfig,
     RosConfig,
     RuntimeProfile,
     SafetyConfig,
     StorageConfig,
-    TrackerConfig,
-    VlmConfig,
 )
 
 
@@ -100,53 +97,15 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
     observation = raw["observation"]
     safety = raw["safety"]
     llm_settings = settings.get("llm", {})
-    vlm_settings = settings.get("vlm", {})
-    detector_settings = settings.get("detector", {})
-    tracker_settings = settings.get("tracker", {})
+    legacy_model_keys = {"vlm", "detector", "tracker"} & settings.keys()
+    if legacy_model_keys:
+        raise ValueError(f"old multi-model settings are unsupported: {sorted(legacy_model_keys)}")
 
     if not isinstance(llm_settings, dict):
         raise ValueError("settings.llm must be a mapping")
-    if not isinstance(vlm_settings, dict):
-        raise ValueError("settings.vlm must be a mapping")
-    if not isinstance(detector_settings, dict):
-        raise ValueError("settings.detector must be a mapping")
-    if not isinstance(tracker_settings, dict):
-        raise ValueError("settings.tracker must be a mapping")
-
-    llm_api_key = str(llm_settings.get("api_key", "")).strip()
-    llm_base_url = str(llm_settings.get("base_url", "")).strip()
-    llm_model = str(llm_settings.get("model", "")).strip()
-
-    vlm_enabled = bool(vlm_settings.get("enabled", False))
-    vlm_base_url = str(vlm_settings.get("base_url", "")).strip() if vlm_enabled else None
-    vlm_model = str(vlm_settings.get("model", "")).strip() if vlm_enabled else None
-    vlm_api_key = str(vlm_settings.get("api_key", "")).strip() if vlm_enabled else None
-    detector_enabled = bool(detector_settings.get("enabled", False))
-    detector_provider = (
-        str(detector_settings.get("provider", "dinoxseek")).strip()
-        if detector_enabled
-        else None
-    )
-    detector_api_key = (
-        str(detector_settings.get("api_key", "")).strip() if detector_enabled else None
-    )
-    detector_model = (
-        str(detector_settings.get("model", "DINO-XSeek-1.0")).strip()
-        if detector_enabled
-        else None
-    )
-    detector_api_path = (
-        str(detector_settings.get("api_path", "/v2/task/dino_xseek/detection")).strip()
-        if detector_enabled
-        else None
-    )
-    tracker_enabled = bool(tracker_settings.get("enabled", False))
-    tracker_base_url = (
-        str(tracker_settings.get("base_url", "")).strip()
-        if tracker_enabled
-        else None
-    )
-    tracker_timeout_s = float(tracker_settings.get("timeout_s", 5.0))
+    llm_api_key = str(os.environ.get("DRONE_HARNESS_LLM_API_KEY", llm_settings.get("api_key", ""))).strip()
+    llm_base_url = str(os.environ.get("DRONE_HARNESS_LLM_BASE_URL", llm_settings.get("base_url", ""))).strip()
+    llm_model = str(os.environ.get("DRONE_HARNESS_LLM_MODEL", llm_settings.get("model", ""))).strip()
     hitl_exempt_flight_tools = safety.get("human_in_the_loop_exempt_flight_tools", [])
     if not isinstance(hitl_exempt_flight_tools, list) or any(
         not isinstance(tool_name, str) or not tool_name.strip()
@@ -191,24 +150,6 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
             base_url=llm_base_url,
             model=llm_model,
             api_key=llm_api_key,
-        ),
-        vlm=VlmConfig(
-            enabled=vlm_enabled,
-            base_url=str(vlm_base_url) if vlm_base_url is not None else None,
-            model=str(vlm_model) if vlm_model is not None else None,
-            api_key=vlm_api_key,
-        ),
-        detector=DetectorConfig(
-            enabled=detector_enabled,
-            provider=detector_provider,
-            api_key=detector_api_key,
-            model=detector_model,
-            api_path=detector_api_path,
-        ),
-        tracker=TrackerConfig(
-            enabled=tracker_enabled,
-            base_url=tracker_base_url,
-            timeout_s=tracker_timeout_s,
         ),
         safety=SafetyConfig(
             human_in_the_loop_for_flight_tools=bool(

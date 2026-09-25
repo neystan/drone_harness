@@ -13,6 +13,8 @@
 
 示例设置见 `settings.example.json`。本地配置路径为 `~/.config/drone_harness/settings.json`，也可用 `DRONE_HARNESS_SETTINGS` 指向本地文件。API Key 不得提交到仓库。
 
+Phase 1 只使用 `settings.json` 的 `llm` 配置作为唯一图片 VLM。可通过仅在当前进程设置的 `DRONE_HARNESS_LLM_API_KEY`、`DRONE_HARNESS_LLM_BASE_URL` 和 `DRONE_HARNESS_LLM_MODEL` 覆盖示例值；完整 `.../chat/completions` 地址也会归一化为 SDK 所需的基础地址。旧 `vlm`、`detector`、`tracker` 并行模型配置会被拒绝。无飞行接口探针见 `scripts/probe_multimodal_provider.py`，只使用内存中的合成图与假工具结果，不连接 ROS/PX4。
+
 ## 离线检查
 
 ```bash

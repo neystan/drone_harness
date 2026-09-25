@@ -8,7 +8,7 @@ from typing import Any
 
 from drone_harness.logging.task_log import log_agent_message, log_observation, log_task_state
 from drone_harness.runtime.observation import ObservationSnapshot, build_observation_message
-from drone_harness.runtime.safety import EndCurrentTurn
+from drone_harness.runtime.safety import EndCurrentTurn, request_confirmed_hover
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.runtime.tool_dispatcher import dispatch_tool_call
 from drone_harness.tools.registry import ToolContext, get_tool_schemas
@@ -30,7 +30,7 @@ def agent_loop(
         return _stop_with_message(context, "没有可用的新 RGB 观测，本轮未请求模型。")
     for _ in range(MAX_TOOL_CALLS_PER_TURN):
         if context.task_state is not None and context.task_state.consecutive_no_progress >= MAX_CONSECUTIVE_NO_PROGRESS:
-            return _stop_with_message(context, "连续动作没有可测位移，已停止自主规划。")
+            return _stop_with_message(context, "连续动作没有可测位移，已停止自主规划。", safety_stop=True)
         _record_task_state(context, "thinking")
         try:
             response = client.chat.completions.create(
@@ -43,11 +43,21 @@ def agent_loop(
             message = response.choices[0].message
             tool_calls = message.tool_calls or []
         except Exception as exc:
-            return _stop_with_message(context, f"模型请求或响应失败，已停止本轮：{type(exc).__name__}")
+            return _stop_with_message(context, f"模型请求或响应失败，已停止本轮：{type(exc).__name__}",
+                                      safety_stop=True)
+        if not isinstance(tool_calls, (list, tuple)) or any(
+            not isinstance(getattr(call, "id", None), str)
+            or not isinstance(getattr(getattr(call, "function", None), "name", None), str)
+            or not isinstance(getattr(getattr(call, "function", None), "arguments", None), str)
+            for call in tool_calls
+        ):
+            return _stop_with_message(context, "模型工具响应结构无效，已停止本轮。", safety_stop=True)
 
         if not tool_calls:
             _record_task_state(context, "idle")
             assistant_text = message.content or ""
+            if not isinstance(assistant_text, str):
+                return _stop_with_message(context, "模型文本响应结构无效，已停止本轮。", safety_stop=True)
             print(f"agent> {assistant_text}")
             messages.append({"role": "assistant", "content": assistant_text})
             log_agent_message(context.profile, context.session_id, "assistant", assistant_text)
@@ -61,7 +71,7 @@ def agent_loop(
                        "message": "本轮模型提出多个动作，全部拒绝且未执行。"}
             for call in tool_calls:
                 messages.append(_build_tool_message(call.id, refusal))
-            return _stop_with_message(context, refusal["message"])
+            return _stop_with_message(context, refusal["message"], safety_stop=True)
 
         call = tool_calls[0]
         before_pose = context.observation.pose_ned
@@ -72,7 +82,7 @@ def agent_loop(
             return _stop_with_message(context, str(exc))
         messages.append(_build_tool_message(call.id, tool_result))
         if not tool_result.get("success"):
-            return _stop_with_message(context, f"{call.function.name} 未成功，已停止本轮。")
+            return _stop_with_message(context, f"{call.function.name} 未成功，已停止本轮。", safety_stop=True)
         if call.function.name == "land":
             return _stop_with_message(context, "降落完成，本轮已结束。")
 
@@ -89,21 +99,18 @@ def agent_loop(
         if snapshot is None or snapshot.rgb_stamp_ns <= min_new_stamp_ns:
             context.observation = None
             context.depth_rules = None
-            return _stop_with_message(context, "动作后没有新 RGB 观测，已停止自主规划。")
+            return _stop_with_message(context, "动作后没有新 RGB 观测，已停止自主规划。", safety_stop=True)
         try:
             append_observation(context, messages, snapshot)
         except ValueError:
             context.observation = None
             context.depth_rules = None
-            return _stop_with_message(context, "动作后观测无效，已停止自主规划。")
+            return _stop_with_message(context, "动作后观测无效，已停止自主规划。", safety_stop=True)
         if context.task_state is not None:
             context.task_state.record_motion_progress(call.function.name, before_pose, snapshot.pose_ned)
         _compact_history(messages)
 
-    assistant_text = "本轮工具调用次数过多，已停止。"
-    print(f"agent> {assistant_text}")
-    log_agent_message(context.profile, context.session_id, "assistant", assistant_text)
-    return assistant_text
+    return _stop_with_message(context, "本轮工具调用次数过多，已停止。", safety_stop=True)
 
 
 def append_observation(
@@ -144,8 +151,14 @@ def _compact_history(messages: list[dict[str, Any]]) -> None:
         messages[:] = messages[:2] + messages[-4:]
 
 
-def _stop_with_message(context: ToolContext, assistant_text: str) -> str:
-    """以不含原图和密钥的文本报告本轮停止原因。"""
+def _stop_with_message(context: ToolContext, assistant_text: str, *, safety_stop: bool = False) -> str:
+    """异常停止时先确认悬停，再输出不含原图和密钥的原因。"""
+    if safety_stop:
+        controller = context.controller
+        flight_state = getattr(controller, "flight_state", None)
+        status = getattr(controller, "vehicle_status", None)
+        if flight_state is not None and flight_state() == "IN_AIR" and getattr(status, "mode", None) == "OFFBOARD":
+            request_confirmed_hover(controller, action_name="agent loop stop")
     print(f"agent> {assistant_text}")
     log_agent_message(context.profile, context.session_id, "assistant", assistant_text)
     return assistant_text
