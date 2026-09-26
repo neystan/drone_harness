@@ -656,8 +656,9 @@ def validate_forward(context: Any, distance_m: Any) -> dict[str, Any] | None:
         return _flight_state_unavailable() if _flight_state(controller) is None else {
             "success": False, "error": "NOT_IN_AIR", "message": "forward requires confirmed airborne state"}
     status = getattr(controller, "vehicle_status", None)
+    allowed_modes = {"OFFBOARD", "AUTO.LOITER"} if context.profile.mode == "simulation" else {"OFFBOARD"}
     if not (bool(getattr(status, "connected", False)) and bool(getattr(status, "armed", False))
-            and getattr(status, "mode", None) == "OFFBOARD"):
+            and getattr(status, "mode", None) in allowed_modes):
         return {"success": False, "error": "PX4_STATE_INVALID", "message": "PX4 is not armed in OFFBOARD"}
     latest_observation = getattr(controller, "latest_observation", None)
     latest = latest_observation() if latest_observation is not None else None
@@ -700,6 +701,8 @@ def forward(context: Any, distance_m: Any) -> dict[str, Any]:
     rejection = validate_forward(context, distance_m)
     if rejection is not None:
         return rejection
+    if context.profile.mode == "simulation" and context.controller.vehicle_status.mode == "AUTO.LOITER":
+        return move(context, float(distance_m), 0.0, 0.0)
     return move(context, float(distance_m), 0.0, 0.0,
                 guard=lambda target: _forward_motion_guard(context, target))
 

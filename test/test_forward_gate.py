@@ -54,6 +54,18 @@ def test_valid_forward_uses_only_positive_x_and_zero_y_z(tmp_path: Path, monkeyp
     assert callable(kwargs["guard"])
 
 
+def test_sim_loiter_forward_reuses_position_hold_handshake(tmp_path: Path, monkeypatch) -> None:
+    """仿真悬停可进入原握手；真机仍不能跳过 OFFBOARD 前提。"""
+    context = forward_context(tmp_path)
+    context.controller.vehicle_status.mode = "AUTO.LOITER"
+    calls = Mock(return_value={"success": True})
+    monkeypatch.setattr(flight, "move", calls)
+    assert flight.forward(context, 0.2)["success"]
+    assert calls.call_args.kwargs == {}
+    context.profile = replace(context.profile, mode="real")
+    assert flight.validate_forward(context, 0.2)["error"] == "PX4_STATE_INVALID"
+
+
 def test_old_or_mismatched_depth_blocks_forward(tmp_path: Path) -> None:
     """观测过期、变号或深度语义未知均给零动作。"""
     context = forward_context(tmp_path)

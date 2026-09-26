@@ -5,6 +5,7 @@ import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 
 def _install_ros_stubs() -> None:
@@ -205,6 +206,30 @@ def test_start_position_hold_returns_false_when_handshake_fails() -> None:
 
     assert result is False
     assert stopped == [True]
+
+
+def test_existing_handshake_switches_armed_loiter_back_to_offboard() -> None:
+    """确认原控制器会对空中悬停状态发送 OFFBOARD 命令并等待模式确认。"""
+    controller = object.__new__(Px4Controller)
+    controller.vehicle_status = SimpleNamespace(mode="AUTO.LOITER", armed=True, connected=True)
+    controller.arming_confirmed = True
+    controller.setpoint_counter = 10
+    controller.send_arm_command = Mock()
+    controller.send_offboard_mode_command = Mock(return_value=SimpleNamespace(future=object()))
+    controller.wait_for_command_ack = Mock(return_value=SimpleNamespace(result=0))
+    controller.is_command_ack_accepted = Mock(return_value=True)
+
+    def confirm_nav_state(_expected_state, *, timeout_s):
+        """模拟 PX4 模式确认更新。"""
+        controller.vehicle_status.mode = "OFFBOARD"
+        return True
+
+    controller.wait_for_nav_state = Mock(side_effect=confirm_nav_state)
+    assert controller.wait_for_offboard_and_arm(timeout_s=1.0)
+    controller.send_arm_command.assert_not_called()
+    controller.send_offboard_mode_command.assert_called_once()
+    controller.wait_for_nav_state.assert_called_once_with(14, timeout_s=1.0)
+    assert controller.offboard_confirmed
 
 
 def test_start_position_hold_rejects_disconnected_cached_offboard_state(monkeypatch) -> None:
