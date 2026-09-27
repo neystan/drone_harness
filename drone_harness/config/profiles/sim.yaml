@@ -30,7 +30,7 @@ observation:
   # 与测量 0.15m、延迟 0.25m 合计预留 1m 的计划净空；并非实测停距保证。
   braking_margin_m: 0.60
   latency_margin_m: 0.25
-  side_obstacle_distance_m: 2.0
+  side_obstacle_distance_m: 2.0  # 兼容旧配置；左右数值现采用 depth_max_m 量程。
 
 safety:
   human_in_the_loop_for_flight_tools: false

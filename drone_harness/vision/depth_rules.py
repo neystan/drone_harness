@@ -23,26 +23,29 @@ class DepthRules:
     right_front: str
     reason: str
     front_obstacle_m: float | None = None
+    left_front_obstacle_m: float | None = None
+    right_front_obstacle_m: float | None = None
+    depth_max_m: float = 20.0
 
-    def as_text(self, *, side_obstacle_distance_m: float = 2.0) -> str:
-        """输出模型需要的中文距离与近障提示，不暴露内部编号。"""
+    def as_text(self) -> str:
+        """统一输出三个方向的障碍距离，不把量程边界当作障碍。"""
         if not self.depth_valid:
             reason = f"原因：{self.reason}。" if self.reason else ""
             return f"深度无效，前方与左右距离未知；本次观测的前进上限：0.00 米。{reason}"
-        front = (
-            "前方：决策视距内未检测到障碍。"
-            if self.front_obstacle_m is None
-            else f"前方障碍距离：{self.front_obstacle_m:.2f} 米（距机体前缘）。"
-        )
-        side_text = {
-            "obstacle": f"{side_obstacle_distance_m:g} 米范围内有近障",
-            "clear": f"{side_obstacle_distance_m:g} 米范围内未检测到近障",
-            "unknown": "未知",
-        }
+        def describe(label: str, status: str, distance: float | None) -> str:
+            """区分实测障碍、范围内未检出与未知。"""
+            if distance is not None:
+                return f"{label}障碍距离：{distance:.2f} 米。"
+            if status == "clear":
+                return f"{label}：{self.depth_max_m:g} 米探测范围内未检测到障碍。"
+            return f"{label}障碍距离：未知。"
+
         return (
-            f"深度有效。\n{front}\n本次观测的前进上限：{self.forward_max_m:.2f} 米。\n"
-            f"左前：{side_text.get(self.left_front, '未知')}。\n"
-            f"右前：{side_text.get(self.right_front, '未知')}。"
+            "深度有效。障碍距离均为沿当前朝向、距机体前缘的距离；左右数值不是转向后的可飞距离。\n"
+            f"{describe('前方', 'clear', self.front_obstacle_m)}\n"
+            f"{describe('左前', self.left_front, self.left_front_obstacle_m)}\n"
+            f"{describe('右前', self.right_front, self.right_front_obstacle_m)}\n"
+            f"本次观测的前进上限：{self.forward_max_m:.2f} 米。"
         )
 
 
@@ -135,13 +138,24 @@ def compute_depth_rules(
         - config.latency_margin_m
     )
     forward_max_m = max(0.0, min(float(profile_max_step_m), remaining_m))
-    side_near = (
+    side_band = (
         valid
-        & (front_clearance <= config.side_obstacle_distance_m)
         & (np.abs(vertical_from_camera) <= config.body_half_height_m + config.measurement_margin_m)
     )
-    left_front = "obstacle" if np.any(side_near & (lateral_from_camera < 0)) else "clear"
-    right_front = "obstacle" if np.any(side_near & (lateral_from_camera > 0)) else "clear"
+
+    def side_distance(direction: np.ndarray) -> tuple[str, float | None]:
+        """在同一量程内取侧方最近障碍，侧方缺测不声称畅通。"""
+        sampled = side_band & direction
+        obstacles = sampled & (depth < config.depth_max_m)
+        # 无效像素无法投影，保守地将该半幅标为未知。
+        if np.any(direction & ~valid) or not np.any(sampled):
+            return "unknown", None
+        if np.any(obstacles):
+            return "obstacle", max(0.0, float(np.min(front_clearance[obstacles])))
+        return "clear", None
+
+    left_front, left_distance = side_distance(columns[None, :] < 0)
+    right_front, right_distance = side_distance(columns[None, :] > 0)
     return DepthRules(
         observation_id=observation_id,
         depth_valid=True,
@@ -151,4 +165,7 @@ def compute_depth_rules(
         right_front=right_front,
         reason="",
         front_obstacle_m=nearest_obstacle_m,
+        left_front_obstacle_m=left_distance,
+        right_front_obstacle_m=right_distance,
+        depth_max_m=config.depth_max_m,
     )

@@ -7,11 +7,47 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from drone_harness.config.loader import load_profile
 from drone_harness.runtime.observation import CameraIntrinsics, ObservationSnapshot
 from drone_harness.vision.depth_rules import compute_depth_rules
 from test_observation_buffer import observation_config
+
+
+def test_side_distances_use_twenty_meter_geometry_without_changing_forward():
+    """左右报告两米之外的障碍，通道外障碍不改变中央前进上限。"""
+    base = snapshot_at(100.0)
+    base = replace(base, intrinsics=replace(base.intrinsics, fx=32.0, fy=32.0))
+    config = observation_config()
+    baseline = compute_depth_rules(base, config, 19.0)
+    depth = base.depth.copy()
+    depth[5, 0] = 6.0
+    depth[5, 15] = 12.0
+    rules = compute_depth_rules(replace(base, depth=depth), config, 19.0)
+    projection = np.sqrt(1 + (7.5 / 32) ** 2 + (.5 / 32) ** 2)
+    offset = config.camera_forward_offset_m - config.body_front_offset_m
+    assert rules.left_front_obstacle_m == pytest.approx(6 / projection + offset)
+    assert rules.right_front_obstacle_m == pytest.approx(12 / projection + offset)
+    assert rules.left_front == rules.right_front == "obstacle"
+    assert rules.forward_max_m == baseline.forward_max_m
+    assert rules.front_obstacle_m is None
+
+
+def test_side_distances_respect_horizon_and_missing_data():
+    """远景不是量程处的障碍；缺测为未知，不能写成零米或畅通。"""
+    base = snapshot_at(100.0)
+    base = replace(base, intrinsics=replace(base.intrinsics, fx=32.0, fy=32.0))
+    config = replace(observation_config(), depth_max_m=10.0)
+    rules = compute_depth_rules(base, config, 19.0)
+    assert rules.left_front_obstacle_m is rules.right_front_obstacle_m is None
+    assert rules.left_front == rules.right_front == "clear"
+    assert rules.as_text().count("10 米探测范围内未检测到障碍") == 3
+    depth = base.depth.copy()
+    depth[5, 0] = np.nan
+    invalid = compute_depth_rules(replace(base, depth=depth), config, 19.0)
+    assert not invalid.depth_valid
+    assert invalid.left_front == invalid.right_front == "unknown"
 
 
 def snapshot_at(distance_m: float = 4.0) -> ObservationSnapshot:

@@ -134,10 +134,7 @@ def append_observation(
     if rules is None:
         rules = compute_depth_rules(snapshot, context.profile.observation,
                                     context.profile.forward_step_limit_m)
-    message = build_observation_message(
-        snapshot, rules, prompt,
-        side_obstacle_distance_m=context.profile.observation.side_obstacle_distance_m,
-    )
+    message = build_observation_message(snapshot, rules, prompt)
     context.observation = snapshot
     context.depth_rules = rules
     if context.task_state is not None:

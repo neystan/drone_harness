@@ -82,13 +82,14 @@ def test_runtime_sends_profile_specific_schema_to_model(tmp_path, mode, limit):
 def test_observation_text_hides_internal_metadata_and_preserves_pairing():
     """只删除模型文字中的编号时间，不删除程序内的同号检查。"""
     snapshot = snapshot_at()
-    rules = DepthRules(snapshot.observation_id, True, 6.0, 5.0, "obstacle", "clear", "", 6.0)
+    rules = DepthRules(snapshot.observation_id, True, 6.0, 5.0, "obstacle", "clear", "", 6.0,
+                       left_front_obstacle_m=3.5)
     message = build_observation_message(snapshot, rules, "寻找路口")
     text = message["content"][0]["text"]
     assert "寻找路口" in text and "前方障碍距离：6.00 米" in text
     assert "本次观测的前进上限：5.00 米" in text
-    assert "左前：2 米范围内有近障" in text
-    assert "右前：2 米范围内未检测到近障" in text
+    assert "左前障碍距离：3.50 米" in text
+    assert "右前：20 米探测范围内未检测到障碍" in text
     assert "observation_id" not in text and "stamp" not in text
     assert snapshot.observation_id not in text and str(snapshot.rgb_stamp_ns) not in text
     assert "reason=ok" not in text
@@ -97,14 +98,15 @@ def test_observation_text_hides_internal_metadata_and_preserves_pairing():
 
 
 def test_invalid_depth_is_unknown_not_clear_and_side_range_is_configurable():
-    """无效数据不再声称前方无障碍，侧方文案沿用配置范围。"""
+    """无效数据不声称无障碍，三个方向采用同一探测范围。"""
     invalid = invalid_depth_rules("private-id", "DEPTH_MISSING").as_text()
     assert "深度无效" in invalid and "未知" in invalid and "DEPTH_MISSING" in invalid
     assert "未检测到" not in invalid and "none_within_horizon" not in invalid
-    rules = DepthRules("private-id", True, 19.9, 18.9, "clear", "obstacle", "")
-    text = rules.as_text(side_obstacle_distance_m=3.0)
-    assert "3 米范围" in text and "2 米范围" not in text
-    assert "决策视距内未检测到障碍" in text
+    rules = DepthRules("private-id", True, 19.9, 18.9, "clear", "unknown", "", depth_max_m=10.0)
+    text = rules.as_text()
+    assert "左前：10 米探测范围内未检测到障碍" in text
+    assert "前方：10 米探测范围内未检测到障碍" in text
+    assert "右前障碍距离：未知" in text
     assert "19.90 米" not in text  # 不把视距边界当作实体障碍。
 
 
