@@ -34,7 +34,8 @@ def test_clearance_uses_perspective_geometry_and_profile_cap() -> None:
     assert rules.depth_valid
     assert 3.9 < rules.front_clearance_m < 4.0
     assert rules.forward_max_m == 0.3
-    assert rules.observation_id in rules.as_text()
+    assert rules.observation_id not in rules.as_text()
+    assert "本次观测的前进上限：0.30 米" in rules.as_text()
 
 
 def test_sim_twenty_meter_horizon_and_one_meter_planned_clearance() -> None:
@@ -59,7 +60,7 @@ def test_sim_twenty_meter_horizon_and_one_meter_planned_clearance() -> None:
     assert near_rules.depth_valid
     assert 1.48 < near_rules.front_obstacle_m < 1.51
     assert 0.48 < near_rules.forward_max_m < 0.51
-    assert "front_obstacle=" in near_rules.as_text()
+    assert "前方障碍距离：" in near_rules.as_text()
 
     blocked_depth = far.depth.copy()
     blocked_depth[5, 7] = 1.05
@@ -105,7 +106,7 @@ def test_unknown_pixels_and_wrong_unit_fail_closed() -> None:
         rules = compute_depth_rules(case, config, 5.0)
         assert not rules.depth_valid
         assert rules.forward_max_m == 0
-        assert "forward_max=0.00m" in rules.as_text()
+        assert "前进上限：0.00 米" in rules.as_text()
 
 
 def test_far_depth_only_proves_clearance_to_configured_horizon() -> None:

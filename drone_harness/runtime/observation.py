@@ -283,6 +283,7 @@ class ObservationBuffer:
 
 def build_observation_message(
     snapshot: ObservationSnapshot, rules: Any, prompt: str | None = None,
+    *, side_obstacle_distance_m: float = 2.0,
 ) -> dict[str, Any]:
     """把观察提示、同号深度摘要与内存 JPEG 合成一条消息。"""
     if snapshot.rgb is None or snapshot.rgb.size == 0 or snapshot.rgb_stamp_ns <= 0:
@@ -297,12 +298,8 @@ def build_observation_message(
     if not encoded_ok or len(encoded) > 1_000_000:
         raise ValueError("RGB JPEG encoding failed or exceeded byte limit")
     data_url = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
-    focus = f"本次观察重点：{prompt}。" if prompt else ""
-    summary = (
-        f"新观测：observation_id={snapshot.observation_id}; "
-        f"rgb_stamp_ns={snapshot.rgb_stamp_ns}; {focus}{rules.as_text()}。"
-        "只依据这张 RGB 和同号深度规则决定至多一个动作。"
-    )
+    focus = f"观察重点：{prompt}\n" if prompt else ""
+    summary = focus + rules.as_text(side_obstacle_distance_m=side_obstacle_distance_m)
     return {
         "role": "user",
         "content": [

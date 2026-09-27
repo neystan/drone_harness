@@ -34,7 +34,7 @@ def agent_loop(
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                tools=get_tool_schemas(),
+                tools=get_tool_schemas(context.profile),
                 tool_choice="auto",
                 temperature=0.0,
             )
@@ -81,7 +81,7 @@ def agent_loop(
         view_changed = bool(tool_result.get("success")) and _motion_changed_view(call.function.name, tool_result)
         if view_changed:
             tool_result["observation_current"] = False
-            tool_result["observation_note"] = "动作前的图像仅供历史参考；需要当前位置画面请调用 observe(prompt)。"
+            tool_result["observation_note"] = "动作前的图像仅供历史参考；请调用 observe 重新观察后再规划。"
         messages.append(_build_tool_message(call.id, tool_result))
         if not tool_result.get("success"):
             return _stop_with_message(context, f"{call.function.name} 未成功，已停止本轮。", safety_stop=True)
@@ -128,7 +128,10 @@ def append_observation(
     if rules is None:
         rules = compute_depth_rules(snapshot, context.profile.observation,
                                     context.profile.forward_step_limit_m)
-    message = build_observation_message(snapshot, rules, prompt)
+    message = build_observation_message(
+        snapshot, rules, prompt,
+        side_obstacle_distance_m=context.profile.observation.side_obstacle_distance_m,
+    )
     context.observation = snapshot
     context.depth_rules = rules
     if context.task_state is not None:
@@ -255,9 +258,11 @@ def _append_turn_end_tool_results(
 
 
 def _build_tool_message(tool_call_id: str, result: dict[str, Any]) -> dict[str, Any]:
-    """构造符合 OpenAI tool_call 协议的 tool message。"""
+    """保留工具配对与执行反馈，仅在模型视图隐藏观测编号和时间。"""
+    model_result = {key: value for key, value in result.items()
+                    if key not in {"observation_id", "rgb_stamp_ns", "depth_stamp_ns"}}
     return {
         "role": "tool",
         "tool_call_id": tool_call_id,
-        "content": json.dumps(result, ensure_ascii=False),
+        "content": json.dumps(model_result, ensure_ascii=False),
     }

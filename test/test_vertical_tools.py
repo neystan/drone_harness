@@ -98,7 +98,7 @@ def test_vertical_tools_have_clear_schema_and_real_hitl() -> None:
     for name in ("up", "down"):
         description = schemas[name]["description"]
         assert "空中" in description
-        assert "单次" in description
+        assert "本次" in schemas[name]["parameters"]["properties"]["distance_m"]["description"]
         assert "障碍" in description
         assert requires_human_in_the_loop(vertical_context("real").profile, name)
 

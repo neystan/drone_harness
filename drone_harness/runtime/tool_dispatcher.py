@@ -91,7 +91,10 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
 
     #要求用户确认
     needs_confirmation = requires_human_in_the_loop(context.profile, tool_name)
-    if tool_name == "land" and not bool(getattr(context.task_state, "landing_authorized", False)):
+    if tool_name == "land" and context.profile.mode == "simulation":
+        # 仿真降落直接复用原飞控检查，不额外要求观测绑定或人工确认。
+        needs_confirmation = False
+    elif tool_name == "land" and not bool(getattr(context.task_state, "landing_authorized", False)):
         needs_confirmation = True
     if needs_confirmation:
         initial_state = _approval_state(context)

@@ -126,7 +126,7 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
             "depth_valid": rules.depth_valid,
             "forward_max_m": rules.forward_max_m,
             "depth_reason": rules.reason,
-            "message": "新 RGB 已取得；图像和同号深度状态将在下一条消息交给当前模型"}
+            "message": "已取得当前图像与深度摘要"}
 
 
 TOOL_DEFINITIONS = [

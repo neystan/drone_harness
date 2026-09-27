@@ -22,7 +22,7 @@ def test_one_request_contains_image_depth_summary_and_seven_tools(tmp_path: Path
     agent_loop(client, "glm-5.3-flash", messages, context)
     request = client.requests[0]
     assert request[-1]["content"][0]["type"] == "text"
-    assert "forward_max=" in request[-1]["content"][0]["text"]
+    assert "本次观测的前进上限：" in request[-1]["content"][0]["text"]
     assert request[-1]["content"][1]["type"] == "image_url"
     assert {schema["function"]["name"] for schema in get_tool_schemas()} == {
         "observe", "takeoff", "forward", "up", "down", "rotate", "land"}

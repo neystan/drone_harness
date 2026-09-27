@@ -1,16 +1,20 @@
-"""定义单目标闭环的模型可见动作 schema。"""
+"""定义导航工具用途、观察示例和当前配置的参数限额。"""
 
 from __future__ import annotations
+
+from copy import deepcopy
+
+from drone_harness.config.schema import RuntimeProfile
 
 
 TAKEOFF_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "takeoff",
-        "description": "Take off to a positive height in meters, subject to runtime limits.",
+        "description": "从地面垂直起飞；已在空中时使用 up。",
         "parameters": {
             "type": "object",
-            "properties": {"height": {"type": "number", "description": "Takeoff height in meters."}},
+            "properties": {"height": {"type": "number", "description": "本次起飞的相对高度，必须大于 0，不超过 10 米。"}},
             "required": ["height"],
             "additionalProperties": False,
         },
@@ -21,13 +25,13 @@ FORWARD_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "forward",
-        "description": "只沿当前朝向前进。程序在每次调用时读取新深度并计算上限；深度失效则执行 0 米，超限则缩短并反馈。",
+        "description": "仅在空中沿当前朝向向前移动。",
         "parameters": {
             "type": "object",
             "properties": {
                 "distance_m": {
                     "type": "number",
-                    "description": "请求的正向米数；仿真单次最多按 19 米与本次深度上限中较小者执行。",
+                    "description": "本次请求的前进距离，必须大于 0，不超过 19 米。",
                 }
             },
             "required": ["distance_m"],
@@ -40,10 +44,10 @@ UP_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "up",
-        "description": "仅在空中上升；distance_m 是本次米数，必须为正且不超过当前 profile 的单次垂直限额。可多次调用，不设累计高度上限；不检查上方障碍。",
+        "description": "仅在空中垂直上升，不检查上方障碍；可多次调用。",
         "parameters": {
             "type": "object",
-            "properties": {"distance_m": {"type": "number", "description": "本次上升的正距离，单位米。"}},
+            "properties": {"distance_m": {"type": "number", "description": "本次上升距离，必须大于 0，不超过 10 米。"}},
             "required": ["distance_m"],
             "additionalProperties": False,
         },
@@ -54,10 +58,10 @@ DOWN_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "down",
-        "description": "仅在空中下降；distance_m 是本次米数，必须为正且不超过当前 profile 的单次垂直限额。不检查下方障碍；目标高度不得低于离地 0.3 米，落地请调用 land。",
+        "description": "仅在空中垂直下降，不检查下方障碍；目标不得低于地面参考高度以上 0.3 米，落地使用 land。",
         "parameters": {
             "type": "object",
-            "properties": {"distance_m": {"type": "number", "description": "本次下降的正距离，单位米。"}},
+            "properties": {"distance_m": {"type": "number", "description": "本次下降距离，必须大于 0，不超过 10 米。"}},
             "required": ["distance_m"],
             "additionalProperties": False,
         },
@@ -68,12 +72,12 @@ ROTATE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "rotate",
-        "description": "Rotate left or right while holding the current position.",
+        "description": "在空中保持位置，向左或向右旋转。",
         "parameters": {
             "type": "object",
             "properties": {
-                "direction": {"type": "string", "enum": ["left", "right"]},
-                "degrees": {"type": "number", "description": "Positive rotation angle in degrees."},
+                "direction": {"type": "string", "enum": ["left", "right"], "description": "left 为左转，right 为右转。"},
+                "degrees": {"type": "number", "description": "本次旋转角度，范围为 0 到 360 度。"},
             },
             "required": ["direction", "degrees"],
             "additionalProperties": False,
@@ -85,7 +89,7 @@ LAND_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "land",
-        "description": "Land only when runtime holds explicit landing authorization.",
+        "description": "在当前位置降落。",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
 }
@@ -94,13 +98,22 @@ OBSERVE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "observe",
-        "description": "按需获取当前 RGB 图像和同帧深度规则，交给同一个模型查看；不会飞行。",
+        "description": (
+            "获取当前 RGB 图像与深度摘要。prompt 简洁描述观察目标，"
+            "不重复索取深度摘要、询问飞行状态或要求计算移动距离。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "说明本次想从画面里寻找或确认什么，去掉首尾空白后为 1 到 1000 字符。",
+                    "description": (
+                        "本次观察重点。示例："
+                        "①寻找左前方十字路口，辨认入口方向及周围地标；"
+                        "②确认红色店招与路口的相对位置；"
+                        "③旋转后重新寻找目标建筑，确认它在画面中的方向；"
+                        "④观察道路是否被树木或建筑遮挡。"
+                    ),
                 }
             },
             "required": ["prompt"],
@@ -120,6 +133,23 @@ TOOL_SCHEMAS = [
 ]
 
 
-def get_tool_schemas() -> list[dict]:
-    """返回一个观察工具与六个飞行动作的 schema。"""
-    return list(TOOL_SCHEMAS)
+def get_tool_schemas(profile: RuntimeProfile | None = None) -> list[dict]:
+    """复制七工具描述，并将当前配置的限额写入参数说明。"""
+    schemas = deepcopy(TOOL_SCHEMAS)
+    if profile is None:
+        return schemas
+    functions = {item["function"]["name"]: item["function"] for item in schemas}
+    limits = (
+        ("takeoff", "height", "本次起飞的相对高度", profile.safety.max_takeoff_height_m),
+        ("forward", "distance_m", "本次请求的前进距离", profile.forward_step_limit_m),
+        ("up", "distance_m", "本次上升距离", profile.safety.max_vertical_move_m),
+        ("down", "distance_m", "本次下降距离", profile.safety.max_vertical_move_m),
+    )
+    for tool, parameter, label, limit in limits:
+        functions[tool]["parameters"]["properties"][parameter]["description"] = (
+            f"{label}，必须大于 0，不超过 {limit:g} 米。"
+        )
+    functions["rotate"]["parameters"]["properties"]["degrees"]["description"] = (
+        f"本次旋转角度，范围为 0 到 {profile.safety.max_rotation_deg:g} 度。"
+    )
+    return schemas

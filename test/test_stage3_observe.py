@@ -55,10 +55,13 @@ def test_first_model_request_is_text_only_then_observe_feeds_same_model(tmp_path
     second = client.requests[1]
     assert [item["role"] for item in second] == ["system", "user", "assistant", "tool", "user"]
     result = json.loads(second[-2]["content"])
-    assert result["success"] and result["observation_id"] == context.observation.observation_id
+    assert result["success"] and "observation_id" not in result
     assert "data:image" not in second[-2]["content"]
     assert "找红色门" in second[-1]["content"][0]["text"]
-    assert result["observation_id"] in second[-1]["content"][0]["text"]
+    assert context.observation.observation_id not in second[-1]["content"][0]["text"]
+    log_text = (tmp_path / "logs" / "session_test" / "tool_calls.jsonl").read_text()
+    assert context.observation.observation_id in log_text
+    assert context.depth_rules.observation_id == context.observation.observation_id
     assert second[-1]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
@@ -92,7 +95,7 @@ def test_observe_with_invalid_depth_still_sends_rgb_to_same_model(tmp_path: Path
     result = json.loads(response[-2]["content"])
     assert result["success"] and not result["depth_valid"]
     assert result["forward_max_m"] == 0
-    assert "depth_valid=false" in response[-1]["content"][0]["text"]
+    assert "深度无效" in response[-1]["content"][0]["text"]
     assert response[-1]["content"][1]["type"] == "image_url"
 
 

@@ -117,23 +117,23 @@ def test_approval_interaction_timeout_stops_without_action(tmp_path: Path, monke
     handler.assert_not_called()
 
 
-def test_land_requires_explicit_human_authorization_even_in_sim(tmp_path: Path, monkeypatch) -> None:
-    """模型声称候选完成不能绕过单独降落确认。"""
+def test_sim_land_no_longer_requires_explicit_human_authorization(tmp_path: Path, monkeypatch) -> None:
+    """仿真不读取人工确认答复，仍通过原降落 handler 执行。"""
     context = forward_context(tmp_path)
     context.task_state.completion_candidate = "候选完成"
-    context.message_bus = SimpleNamespace(get_next_user_message=lambda: SimpleNamespace(content="n"),
+    context.message_bus = SimpleNamespace(get_next_user_message=Mock(side_effect=AssertionError("不应询问")),
                                           has_pending_user_message=lambda: False)
     handler = Mock(return_value={"success": True})
     monkeypatch.setattr(dispatcher, "get_tool_definition", lambda _name: SimpleNamespace(handler=handler))
-    with pytest.raises(EndCurrentTurn):
-        dispatcher.dispatch_tool_call(context, tool_call("land"))
-    handler.assert_not_called()
+    assert dispatcher.dispatch_tool_call(context, tool_call("land"))["success"]
+    handler.assert_called_once()
+    context.message_bus.get_next_user_message.assert_not_called()
     assert not context.task_state.landing_authorized
 
 
 def test_land_without_approval_channel_cannot_execute(tmp_path: Path, monkeypatch) -> None:
-    """没有人工确认通道时降落提议必须 fail-closed。"""
-    context = forward_context(tmp_path)
+    """实机没有人工确认通道时降落提议必须 fail-closed。"""
+    context = real_context(tmp_path)
     handler = Mock(return_value={"success": True})
     monkeypatch.setattr(dispatcher, "get_tool_definition", lambda _name: SimpleNamespace(handler=handler))
     with pytest.raises(EndCurrentTurn):

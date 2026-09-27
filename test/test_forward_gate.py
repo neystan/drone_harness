@@ -197,17 +197,20 @@ def test_dispatch_returns_clamp_feedback_in_normal_tool_result(tmp_path: Path, m
 
 
 def test_runtime_prompt_explains_sim_and_real_limits(tmp_path: Path) -> None:
-    """模型能读到仿真 19 米、1 米计划余量与真机单独限额。"""
+    """限额移入工具参数说明，系统提示只解释反馈与真机审批。"""
     from drone_harness.llm.prompts import build_system_prompt
+    from drone_harness.tools.schemas import get_tool_schemas
 
     context = forward_context(tmp_path)
     sim_prompt = build_system_prompt(context.profile)
-    assert "19 米" in sim_prompt and "约 1 米" in sim_prompt
-    assert "缩短" in sim_prompt and "不会移动" in sim_prompt
+    assert "19 米" not in sim_prompt and "约 1 米" not in sim_prompt
+    assert "缩短" in sim_prompt and "不执行" in sim_prompt
+    assert "19 米" in str(get_tool_schemas(context.profile))
     real_profile = replace(context.profile, mode="real", safety=replace(
         context.profile.safety, max_relative_move_m=0.2))
     real_prompt = build_system_prompt(real_profile)
-    assert "0.2 米" in real_prompt and "每次均须人工确认" in real_prompt
+    assert "每次均须人工确认" in real_prompt
+    assert "0.2 米" in str(get_tool_schemas(real_profile))
     assert "19 米" not in real_prompt
 
 

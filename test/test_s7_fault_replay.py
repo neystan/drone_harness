@@ -110,7 +110,8 @@ def test_bad_model_reply_stops_without_dispatch_and_confirms_hover(
     answer = agent_loop(client, "test-vlm", messages, context)
     assert answer
     assert (create.call_count if fault == "timeout" else len(client.requests)) == 1
-    assert context.observation.observation_id in messages[2]["content"][0]["text"]
+    assert context.observation.observation_id not in messages[2]["content"][0]["text"]
+    assert context.depth_rules.observation_id == context.observation.observation_id
     dispatch.assert_not_called()
     hover.assert_called_once()
 

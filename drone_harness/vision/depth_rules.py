@@ -24,20 +24,25 @@ class DepthRules:
     reason: str
     front_obstacle_m: float | None = None
 
-    def as_text(self) -> str:
-        """生成给同一 VLM 阅读的简短有单位摘要。"""
-        clearance = (
-            "unknown"
-            if self.front_clearance_m is None
-            else f"{self.front_clearance_m:.2f}m"
+    def as_text(self, *, side_obstacle_distance_m: float = 2.0) -> str:
+        """输出模型需要的中文距离与近障提示，不暴露内部编号。"""
+        if not self.depth_valid:
+            reason = f"原因：{self.reason}。" if self.reason else ""
+            return f"深度无效，前方与左右距离未知；本次观测的前进上限：0.00 米。{reason}"
+        front = (
+            "前方：决策视距内未检测到障碍。"
+            if self.front_obstacle_m is None
+            else f"前方障碍距离：{self.front_obstacle_m:.2f} 米（距机体前缘）。"
         )
+        side_text = {
+            "obstacle": f"{side_obstacle_distance_m:g} 米范围内有近障",
+            "clear": f"{side_obstacle_distance_m:g} 米范围内未检测到近障",
+            "unknown": "未知",
+        }
         return (
-            f"observation_id={self.observation_id}; "
-            f"depth_valid={str(self.depth_valid).lower()}; "
-            f"front_clearance={clearance}; forward_max={self.forward_max_m:.2f}m; "
-            f"front_obstacle={'none_within_horizon' if self.front_obstacle_m is None else f'{self.front_obstacle_m:.2f}m'}; "
-            f"left_front={self.left_front}; right_front={self.right_front}; "
-            f"reason={self.reason or 'ok'}"
+            f"深度有效。\n{front}\n本次观测的前进上限：{self.forward_max_m:.2f} 米。\n"
+            f"左前：{side_text.get(self.left_front, '未知')}。\n"
+            f"右前：{side_text.get(self.right_front, '未知')}。"
         )
 
 
