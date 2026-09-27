@@ -12,9 +12,11 @@ from drone_harness.runtime.observation import ObservationSnapshot
 from drone_harness.runtime.task_state import TaskState
 from drone_harness.vision.depth_rules import DepthRules, compute_depth_rules, invalid_depth_rules
 from . import flight
+from .state import get_state
 from .schemas import (
     DOWN_TOOL_SCHEMA,
     FORWARD_TOOL_SCHEMA,
+    GET_STATE_TOOL_SCHEMA,
     LAND_TOOL_SCHEMA,
     OBSERVE_TOOL_SCHEMA,
     ROTATE_TOOL_SCHEMA,
@@ -78,6 +80,11 @@ def _land_handler(context: ToolContext, _arguments: dict[str, Any]) -> dict:
     return flight.land(context)
 
 
+def _get_state_handler(context: ToolContext, _arguments: dict[str, Any]) -> dict:
+    """只读已有飞控缓存，不发送动作或采集图像。"""
+    return get_state(context.controller)
+
+
 def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     """按模型提示取一组新 RGB-D，只返回脱敏元数据。"""
     context.observation = None
@@ -131,6 +138,7 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
 
 TOOL_DEFINITIONS = [
     ToolDefinition("observe", OBSERVE_TOOL_SCHEMA, _observe_handler),
+    ToolDefinition("get_state", GET_STATE_TOOL_SCHEMA, _get_state_handler),
     ToolDefinition("takeoff", TAKEOFF_TOOL_SCHEMA, _takeoff_handler),
     ToolDefinition("forward", FORWARD_TOOL_SCHEMA, _forward_handler),
     ToolDefinition("up", UP_TOOL_SCHEMA, _up_handler),

@@ -1,4 +1,4 @@
-"""验证同一模型收图、收七工具及服务异常时零后续动作。"""
+"""验证同一模型收图、收八工具及服务异常时零后续动作。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def test_one_request_contains_image_depth_summary_and_seven_tools(tmp_path: Path
     assert "本次观测的前进上限：" in request[-1]["content"][0]["text"]
     assert request[-1]["content"][1]["type"] == "image_url"
     assert {schema["function"]["name"] for schema in get_tool_schemas()} == {
-        "observe", "takeoff", "forward", "up", "down", "rotate", "land"}
+        "observe", "get_state", "takeoff", "forward", "up", "down", "rotate", "land"}
 
 
 def test_service_failure_causes_confirmed_hover_and_no_tool_dispatch(tmp_path: Path, monkeypatch) -> None:

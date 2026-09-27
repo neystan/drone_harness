@@ -122,8 +122,22 @@ OBSERVE_TOOL_SCHEMA = {
     },
 }
 
+GET_STATE_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_state",
+        "description": (
+            "查询最近收到的三维位置、是否在空中、解锁状态、飞行模式和朝向。"
+            "位置采用本地北/东/下坐标（米），不是经纬度；高度相对记录的地面参考，不是实时离地距离。"
+            "朝向以北为 0 度、东为 90 度；缺失数据返回未知，位置年龄表示数据距今多久。"
+        ),
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+}
+
 TOOL_SCHEMAS = [
     OBSERVE_TOOL_SCHEMA,
+    GET_STATE_TOOL_SCHEMA,
     TAKEOFF_TOOL_SCHEMA,
     FORWARD_TOOL_SCHEMA,
     UP_TOOL_SCHEMA,
@@ -134,7 +148,7 @@ TOOL_SCHEMAS = [
 
 
 def get_tool_schemas(profile: RuntimeProfile | None = None) -> list[dict]:
-    """复制七工具描述，并将当前配置的限额写入参数说明。"""
+    """复制工具描述，并将当前配置的限额写入参数说明。"""
     schemas = deepcopy(TOOL_SCHEMAS)
     if profile is None:
         return schemas
