@@ -4,17 +4,12 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Callable
+from typing import Any
 
-from drone_harness.bus.intervention import (
-    build_interrupted_result,
-    consume_intervention,
-    interrupt_if_requested,
-    should_interrupt,
-)
+from drone_harness.bus.intervention import interrupt_if_requested
 from drone_harness.px4.frame import is_finite_number
 from drone_harness.runtime.safety import request_confirmed_hover
-from drone_harness.vision.depth_rules import compute_depth_rules
+from drone_harness.vision.depth_rules import compute_depth_rules, invalid_depth_rules
 
 
 WAIT_FOR_POSITION_TIMEOUT_S = 3.0
@@ -538,6 +533,7 @@ def rotate(context: Any, direction: str, degrees: float) -> dict:
             "success": True,
             "message": "rotate complete after 0.0 degrees",
             "direction": direction,
+            "degrees": degrees,
             "target_yaw_rad": current_heading,
         }
 
@@ -590,6 +586,7 @@ def rotate(context: Any, direction: str, degrees: float) -> dict:
                         "success": True,
                         "message": f"rotate complete after {direction} {degrees:.1f} degrees",
                         "direction": direction,
+                        "degrees": degrees,
                         "target_yaw_rad": final_heading,
                         "final_position_ned": controller.current_position_ned(),
                     }
@@ -598,6 +595,7 @@ def rotate(context: Any, direction: str, degrees: float) -> dict:
                 "success": True,
                 "message": f"rotate complete after {direction} {degrees:.1f} degrees",
                 "direction": direction,
+                "degrees": degrees,
                 "target_yaw_rad": final_heading,
                 "final_position_ned": controller.current_position_ned(),
             }
@@ -616,95 +614,138 @@ def rotate(context: Any, direction: str, degrees: float) -> dict:
     }
 
 
-def _fresh_forward_observation(context: Any, snapshot: Any) -> bool:
-    """核对 RGB、深度及位姿仍在同一可信时钟域的时效内。"""
-    if snapshot is None or snapshot.depth_stamp_ns is None or snapshot.pose_ned is None:
-        return False
-    config = context.profile.observation
-    wall_ns = time.time_ns()
-    monotonic_ns = time.monotonic_ns()
-    max_age_ns = int(config.max_frame_age_s * 1e9)
-    skew_ns = int(config.max_clock_skew_s * 1e9)
-    return (
-        all(-skew_ns <= wall_ns - stamp <= max_age_ns
-            for stamp in (snapshot.rgb_stamp_ns, snapshot.depth_stamp_ns))
-        and 0 <= monotonic_ns - snapshot.received_monotonic_ns <= max_age_ns
-        and snapshot.pose_age_s is not None
-        and 0 <= snapshot.pose_age_s <= config.max_frame_age_s
-    )
-
-
 def validate_forward(context: Any, distance_m: Any) -> dict[str, Any] | None:
-    """按当轮观测和最新传感器重验正向距离，超限绝不截短。"""
+    """校验参数与飞控状态；真机额外保留同号深度硬门。"""
     if not is_finite_number(distance_m):
         return {"success": False, "error": "INVALID_FORWARD_DISTANCE", "message": "distance_m must be finite"}
     distance = float(distance_m)
     if distance <= 0:
         return {"success": False, "error": "INVALID_FORWARD_DISTANCE", "message": "distance_m must be positive"}
+    if context.profile.mode == "simulation":
+        return _forward_vehicle_rejection(context)
     snapshot = getattr(context, "observation", None)
     rules = getattr(context, "depth_rules", None)
     if snapshot is None or rules is None or rules.observation_id != snapshot.observation_id:
         return {"success": False, "error": "FORWARD_OBSERVATION_MISSING", "message": "no matching RGB-D rules"}
-    if not _fresh_forward_observation(context, snapshot) or not rules.depth_valid:
-        return {"success": False, "error": "FORWARD_DEPTH_STALE_OR_INVALID", "message": "RGB-D or pose is stale or invalid",
+    if not is_finite_number(rules.forward_max_m) or rules.forward_max_m < 0:
+        return {"success": False, "error": "FORWARD_DEPTH_INVALID", "message": "bound RGB-D depth is invalid",
                 "observation_id": snapshot.observation_id}
-    if distance > min(context.profile.safety.max_relative_move_m, rules.forward_max_m):
+    if not rules.depth_valid:
+        return {"success": False, "error": "FORWARD_DEPTH_INVALID", "message": "bound RGB-D depth is invalid",
+                "observation_id": snapshot.observation_id}
+    safe_limit = min(context.profile.forward_step_limit_m, rules.forward_max_m)
+    if distance > safe_limit:
         return {"success": False, "error": "FORWARD_LIMIT_EXCEEDED", "message": "requested distance exceeds dynamic limit",
-                "observation_id": snapshot.observation_id, "forward_max_m": rules.forward_max_m}
+                "observation_id": snapshot.observation_id, "forward_max_m": safe_limit}
+    return _forward_vehicle_rejection(context)
+
+
+def _forward_vehicle_rejection(context: Any) -> dict[str, Any] | None:
+    """沿用已连接、已解锁、空中及允许模式的飞控前提。"""
     controller = context.controller
-    if _flight_state(controller) != "IN_AIR":
-        return _flight_state_unavailable() if _flight_state(controller) is None else {
+    flight_state = _flight_state(controller)
+    if flight_state != "IN_AIR":
+        return _flight_state_unavailable() if flight_state is None else {
             "success": False, "error": "NOT_IN_AIR", "message": "forward requires confirmed airborne state"}
     status = getattr(controller, "vehicle_status", None)
+    mode = getattr(status, "mode", None)
     allowed_modes = {"OFFBOARD", "AUTO.LOITER"} if context.profile.mode == "simulation" else {"OFFBOARD"}
     if not (bool(getattr(status, "connected", False)) and bool(getattr(status, "armed", False))
-            and getattr(status, "mode", None) in allowed_modes):
-        return {"success": False, "error": "PX4_STATE_INVALID", "message": "PX4 is not armed in OFFBOARD"}
-    latest_observation = getattr(controller, "latest_observation", None)
-    latest = latest_observation() if latest_observation is not None else None
-    if latest is None or latest.observation_id != snapshot.observation_id:
-        return {"success": False, "error": "FORWARD_OBSERVATION_CHANGED", "message": "current RGB-D differs from VLM observation"}
-    if not _fresh_forward_observation(context, latest):
-        return {"success": False, "error": "FORWARD_DEPTH_STALE_OR_INVALID", "message": "latest RGB-D or pose is stale"}
-    latest_rules = compute_depth_rules(latest, context.profile.observation,
-                                       context.profile.safety.max_relative_move_m)
-    if not latest_rules.depth_valid or distance > latest_rules.forward_max_m:
-        return {"success": False, "error": "FORWARD_LIMIT_CHANGED", "message": "latest depth no longer permits request",
-                "observation_id": latest.observation_id, "forward_max_m": latest_rules.forward_max_m}
+            and mode in allowed_modes):
+        return {"success": False, "error": "PX4_STATE_INVALID",
+            "message": f"PX4 must be connected and armed in {', '.join(sorted(allowed_modes))}; current mode={mode}"}
     return None
 
 
-def _forward_motion_guard(context: Any, target_position: list[float]) -> str | None:
-    """在原 move 轮询内按最新深度、位姿与 PX4 状态检查剩余行程。"""
-    controller = context.controller
-    status = getattr(controller, "vehicle_status", None)
-    if not (bool(getattr(status, "connected", False)) and bool(getattr(status, "armed", False))
-            and getattr(status, "mode", None) == "OFFBOARD" and _flight_state(controller) == "IN_AIR"):
-        return "PX4_STATE_CHANGED"
-    latest_observation = getattr(controller, "latest_observation", None)
-    latest = latest_observation() if latest_observation is not None else None
-    if not _fresh_forward_observation(context, latest):
-        return "FORWARD_OBSERVATION_LOST"
-    rules = compute_depth_rules(latest, context.profile.observation,
-                                context.profile.safety.max_relative_move_m)
-    if not rules.depth_valid:
-        return rules.reason or "FORWARD_DEPTH_INVALID"
-    pose = latest.pose_ned
-    remaining_m = math.sqrt(sum((target - current) ** 2 for target, current in zip(target_position, pose)))
-    if remaining_m > rules.forward_max_m + 1e-6:
-        return "FORWARD_CLEARANCE_SHRANK"
-    return None
+def _sim_forward_rules(context: Any):
+    """只为本次仿真正前进等待新 RGB-D 并计算几何上限。"""
+    started_ns = time.time_ns()
+    waiter = getattr(context.controller, "wait_for_observation", None)
+    if not callable(waiter):
+        return invalid_depth_rules("none", "FORWARD_OBSERVATION_UNAVAILABLE")
+    try:
+        snapshot = waiter(after_stamp_ns=started_ns)
+    except Exception as exc:
+        return invalid_depth_rules("none", f"FORWARD_OBSERVATION_ERROR_{type(exc).__name__}")
+    if snapshot is None:
+        return invalid_depth_rules("none", "FORWARD_OBSERVATION_TIMEOUT")
+    observation_id = getattr(snapshot, "observation_id", "none")
+    if not isinstance(observation_id, str) or not observation_id:
+        return invalid_depth_rules("none", "FORWARD_OBSERVATION_ID_INVALID")
+    rgb_stamp_ns = getattr(snapshot, "rgb_stamp_ns", None)
+    depth_stamp_ns = getattr(snapshot, "depth_stamp_ns", None)
+    threshold_ns = started_ns + int(context.profile.observation.max_clock_skew_s * 1e9)
+    if not isinstance(rgb_stamp_ns, int) or rgb_stamp_ns <= threshold_ns:
+        return invalid_depth_rules(observation_id, "FORWARD_RGB_NOT_NEW")
+    if getattr(snapshot, "depth_error", ""):
+        return invalid_depth_rules(observation_id, snapshot.depth_error)
+    if not isinstance(depth_stamp_ns, int) or depth_stamp_ns <= threshold_ns:
+        return invalid_depth_rules(observation_id, "FORWARD_DEPTH_NOT_NEW")
+    sync_ns = int(context.profile.observation.max_sync_delta_s * 1e9)
+    intrinsics = getattr(snapshot, "intrinsics", None)
+    intrinsics_stamp_ns = getattr(intrinsics, "stamp_ns", None)
+    if (abs(rgb_stamp_ns - depth_stamp_ns) > sync_ns or intrinsics is None
+            or not isinstance(intrinsics_stamp_ns, int)
+            or abs(intrinsics_stamp_ns - depth_stamp_ns) > sync_ns):
+        return invalid_depth_rules(observation_id, "FORWARD_RGB_DEPTH_UNSYNCED")
+    try:
+        rules = compute_depth_rules(snapshot, context.profile.observation,
+                                    context.profile.forward_step_limit_m)
+    except Exception as exc:
+        return invalid_depth_rules(observation_id, f"FORWARD_DEPTH_PARSE_{type(exc).__name__}")
+    if rules.observation_id != observation_id:
+        return invalid_depth_rules(observation_id, "FORWARD_DEPTH_OBSERVATION_MISMATCH")
+    return rules
 
 
 def forward(context: Any, distance_m: Any) -> dict[str, Any]:
-    """通过动态深度限额后仅复用 move 的机体正前方向能力。"""
+    """仿真每次重取深度后缩短前进，缺深度则正常回报零位移。"""
     rejection = validate_forward(context, distance_m)
     if rejection is not None:
         return rejection
-    if context.profile.mode == "simulation" and context.controller.vehicle_status.mode == "AUTO.LOITER":
-        return move(context, float(distance_m), 0.0, 0.0)
-    return move(context, float(distance_m), 0.0, 0.0,
-                guard=lambda target: _forward_motion_guard(context, target))
+    requested = float(distance_m)
+    rules = _sim_forward_rules(context) if context.profile.mode == "simulation" else context.depth_rules
+    if not is_finite_number(rules.forward_max_m) or rules.forward_max_m < 0:
+        rules = invalid_depth_rules(rules.observation_id, "FORWARD_DEPTH_LIMIT_INVALID")
+    commanded = min(requested, context.profile.forward_step_limit_m, rules.forward_max_m) if rules.depth_valid else 0.0
+    feedback = {
+        "requested_distance_m": requested,
+        "commanded_distance_m": commanded,
+        "forward_max_m": min(context.profile.forward_step_limit_m, rules.forward_max_m),
+        "depth_valid": rules.depth_valid,
+        "depth_reason": rules.reason,
+        "front_clearance_m": rules.front_clearance_m,
+        "front_obstacle_m": rules.front_obstacle_m,
+        "observation_id": None if rules.observation_id == "none" else rules.observation_id,
+        "clamped": commanded < requested,
+    }
+    if commanded <= 0:
+        if not rules.depth_valid:
+            reason = f"深度无效（{rules.reason}），前方距离未知"
+        elif rules.front_obstacle_m is not None:
+            reason = f"前方约 {rules.front_obstacle_m:.2f} 米有障碍物，需保留约 1 米计划净空"
+        else:
+            reason = "当前规则未确认可前进净空"
+        return {"success": True, "motion_executed": False,
+                "message": f"未移动：{reason}；本次前进指令为 0 米，请依据新观测重新规划。", **feedback}
+    state_changed = _forward_vehicle_rejection(context)
+    if state_changed is not None:
+        return {**state_changed, **feedback}
+    result = move(context, commanded, 0.0, 0.0,
+                  completion_tolerance_m=min(0.05, commanded / 2.0))
+    result.update(feedback)
+    if result.get("success"):
+        result["motion_executed"] = True
+        if commanded < requested:
+            if rules.front_obstacle_m is not None:
+                why = f"前方约 {rules.front_obstacle_m:.2f} 米有障碍物，需保留约 1 米计划净空"
+            else:
+                why = f"20 米探测视距及单次 {context.profile.forward_step_limit_m:.2f} 米上限"
+            result["message"] = (
+                f"请求前进 {requested:.2f} 米，因{why}，按安全上限指令前进 {commanded:.2f} 米；"
+                f"{result.get('message', '动作已完成')}"
+            )
+    return result
 
 
 def _vertical_move(context: Any, distance_m: Any, *, upward: bool) -> dict[str, Any]:
@@ -753,7 +794,6 @@ def move(
     y: float,
     z: float,
     *,
-    guard: Callable[[list[float]], str | None] | None = None,
     completion_tolerance_m: float | None = None,
 ) -> dict:
     """按机体系 FRD 偏移执行相对移动。"""
@@ -771,7 +811,10 @@ def move(
     y = float(y)
     z = float(z)
 
-    if abs(x) > profile.safety.max_relative_move_m:
+    x_limit = profile.safety.max_relative_move_m
+    if getattr(profile, "mode", None) == "simulation" and x > 0 and y == 0 and z == 0:
+        x_limit = profile.forward_step_limit_m
+    if abs(x) > x_limit:
         return {
             "success": False,
             "error": "X_OUT_OF_RANGE",
@@ -837,12 +880,6 @@ def move(
             "target_position_ned": target_position,
         }
 
-    if guard is not None:
-        reason = guard(target_position)
-        if reason is not None:
-            return {"success": False, "error": "FORWARD_GUARD_REJECTED", "reason": reason,
-                    "message": "forward guard rejected target before position hold"}
-
     if controller.start_position_hold(target_position) is False:
         return _handle_position_hold_start_failure(controller, "move", airborne=True)
     controller.get_logger().info(
@@ -851,32 +888,16 @@ def move(
 
     timeout = time.time() + profile.safety.action_timeout_s
     while time.time() < timeout:
-        if guard is not None:
-            if should_interrupt(context):
-                intervention = consume_intervention(context)
-                safety_result = request_confirmed_hover(controller, action_name="forward interrupt")
-                return {**build_interrupted_result(intervention or "", controller.current_position_ned()),
-                        **safety_result}
-            reason = guard(target_position)
-            if reason is not None:
-                safety_result = request_confirmed_hover(controller, action_name="forward guard")
-                return {"success": False, "error": "FORWARD_GUARD_TRIGGERED", "reason": reason,
-                        **safety_result, "message": "forward guard stopped motion; PX4 AUTO_LOITER confirmed",
-                        "target_position_ned": target_position,
-                        "final_position_ned": controller.current_position_ned()}
-        else:
-            interrupted = interrupt_if_requested(context, hover_on_flight_tool=True)
-            if interrupted is not None:
-                return interrupted
-        if completion_tolerance_m is not None:
-            reached_target = math.dist(controller.current_position_ned(), target_position) <= completion_tolerance_m
-        elif guard is None:
-            reached_target = controller.is_at_target(target_position)
-        else:
-            reached_target = math.dist(controller.current_position_ned(), target_position) <= 0.05
+        interrupted = interrupt_if_requested(context, hover_on_flight_tool=True)
+        if interrupted is not None:
+            return interrupted
+        reached_target = (
+            controller.is_at_target(target_position)
+            if completion_tolerance_m is None
+            else math.dist(controller.current_position_ned(), target_position) <= completion_tolerance_m
+        )
         if reached_target:
-            if guard is None:
-                time.sleep(0.5)
+            time.sleep(0.5)
             return {
                 "success": True,
                 "message": f"move complete after body-frame offset ({x:.2f}, {y:.2f}, {z:.2f})",

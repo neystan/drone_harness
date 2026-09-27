@@ -1,4 +1,4 @@
-"""验证 S2 中间态只暴露四动作，且前进严格拒绝执行。"""
+"""验证模型只能调用当前公开的飞行工具。"""
 
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -7,9 +7,9 @@ from drone_harness.tools.registry import get_tool_definition, get_tool_definitio
 from drone_harness.tools.schemas import get_tool_schemas
 
 
-def test_model_tool_surface_is_exactly_six_actions() -> None:
-    """旧状态、视觉和任意位移工具均不可再被模型调用。"""
-    expected = {"takeoff", "forward", "up", "down", "rotate", "land"}
+def test_model_tool_surface_is_observe_plus_six_actions() -> None:
+    """只新增按需观察，不恢复旧状态、视觉或任意位移工具。"""
+    expected = {"observe", "takeoff", "forward", "up", "down", "rotate", "land"}
     assert {tool.name for tool in get_tool_definitions()} == expected
     assert {schema["function"]["name"] for schema in get_tool_schemas()} == expected
     for removed in (
@@ -26,15 +26,19 @@ def test_model_tool_surface_is_exactly_six_actions() -> None:
         assert get_tool_definition(removed) is None
 
 
-def test_forward_without_observation_issues_no_controller_command() -> None:
-    """没有同号深度规则时，前进安全门必须零飞控调用。"""
-    controller = Mock()
-    context = SimpleNamespace(controller=controller)
+def test_forward_without_observation_still_needs_new_depth(tmp_path) -> None:
+    """无 observe 时若本次取不到深度，前进仍为零飞控命令。"""
+    from test_agent_observation_loop import context_for
+
+    controller = SimpleNamespace(
+        wait_for_observation=Mock(return_value=None),
+        vehicle_status=SimpleNamespace(mode="OFFBOARD", connected=True, armed=True),
+        flight_state=lambda: "IN_AIR",
+    )
+    context = context_for(tmp_path, controller)
     result = get_tool_definition("forward").handler(context, {"distance_m": 0.2})
-    assert result["success"] is False
-    assert result["error"] == "FORWARD_OBSERVATION_MISSING"
-    controller.assert_not_called()
-    assert controller.method_calls == []
+    assert result["success"] and result["commanded_distance_m"] == 0
+    controller.wait_for_observation.assert_called_once()
 
 
 def test_old_package_and_entry_names_are_not_packaged() -> None:

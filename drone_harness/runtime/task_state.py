@@ -147,6 +147,10 @@ class TaskState:
         """记录本轮用于规划和安全核对的观测号。"""
         self.observation_id = observation_id
 
+    def clear_observation(self) -> None:
+        """移动或重取图时清掉不再代表当前位置的观测号。"""
+        self.observation_id = None
+
     def record_motion_progress(
         self,
         tool_name: str,
@@ -155,7 +159,7 @@ class TaskState:
         *,
         rotation_degrees: float | None = None,
     ) -> None:
-        """平移按位姿计数；成功非零转向允许重新探索。"""
+        """平移按位姿计数；成功转向且取得新观测后允许重新探索。"""
         if tool_name == "rotate":
             if (isinstance(rotation_degrees, (int, float)) and not isinstance(rotation_degrees, bool)
                     and math.isfinite(rotation_degrees) and rotation_degrees > 0):

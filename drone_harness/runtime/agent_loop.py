@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import time
+import math
 from typing import Any
 
 from drone_harness.logging.task_log import log_agent_message, log_observation, log_task_state
@@ -25,9 +25,7 @@ def agent_loop(
     messages: list[dict[str, Any]],
     context: ToolContext,
 ) -> str:
-    """每轮只执行零或一个动作，并在下一轮前注入新 RGB-D。"""
-    if context.observation is None or context.depth_rules is None:
-        return _stop_with_message(context, "没有可用的新 RGB 观测，本轮未请求模型。")
+    """连续处理单工具调用，只有 observe 才向模型插入新图。"""
     for _ in range(MAX_TOOL_CALLS_PER_TURN):
         if context.task_state is not None and context.task_state.consecutive_no_progress >= MAX_CONSECUTIVE_NO_PROGRESS:
             return _stop_with_message(context, "连续动作没有可测位移，已停止自主规划。", safety_stop=True)
@@ -74,40 +72,45 @@ def agent_loop(
             return _stop_with_message(context, refusal["message"], safety_stop=True)
 
         call = tool_calls[0]
-        before_pose = context.observation.pose_ned
+        before_pose = _current_pose(context)
         try:
             tool_result = dispatch_tool_call(context, call)
         except EndCurrentTurn as exc:
             _append_turn_end_tool_results(messages, tool_calls, 0, exc)
             return _stop_with_message(context, str(exc))
+        view_changed = bool(tool_result.get("success")) and _motion_changed_view(call.function.name, tool_result)
+        if view_changed:
+            tool_result["observation_current"] = False
+            tool_result["observation_note"] = "动作前的图像仅供历史参考；需要当前位置画面请调用 observe(prompt)。"
         messages.append(_build_tool_message(call.id, tool_result))
         if not tool_result.get("success"):
             return _stop_with_message(context, f"{call.function.name} 未成功，已停止本轮。", safety_stop=True)
         if call.function.name == "land":
             return _stop_with_message(context, "降落完成，本轮已结束。")
-
-        action_end_stamp_ns = time.time_ns()
-        wait_for_observation = getattr(context.controller, "wait_for_observation", None)
-        try:
-            snapshot = (
-                wait_for_observation(after_stamp_ns=action_end_stamp_ns)
-                if wait_for_observation is not None else None
-            )
-        except Exception:
-            snapshot = None
-        min_new_stamp_ns = action_end_stamp_ns + int(context.profile.observation.max_clock_skew_s * 1e9)
-        if snapshot is None or snapshot.rgb_stamp_ns <= min_new_stamp_ns:
-            context.observation = None
-            context.depth_rules = None
-            return _stop_with_message(context, "动作后没有新 RGB 观测，已停止自主规划。", safety_stop=True)
-        try:
-            append_observation(context, messages, snapshot)
-        except ValueError:
-            context.observation = None
-            context.depth_rules = None
-            return _stop_with_message(context, "动作后观测无效，已停止自主规划。", safety_stop=True)
+        if call.function.name == "observe":
+            snapshot = context.observation
+            rules = context.depth_rules
+            if snapshot is None or rules is None or rules.observation_id != snapshot.observation_id:
+                return _stop_with_message(context, "observe 未提供同号 RGB-D 观测，已停止本轮。", safety_stop=True)
+            try:
+                append_observation(context, messages, snapshot, prompt=tool_result.get("prompt"), rules=rules)
+            except Exception:
+                context.observation = None
+                context.depth_rules = None
+                return _stop_with_message(context, "observe 图像无效，已停止本轮。", safety_stop=True)
+            _compact_history(messages)
+            continue
         if context.task_state is not None:
-            context.task_state.record_motion_progress(call.function.name, before_pose, snapshot.pose_ned)
+            after_pose = _result_pose(tool_result) or _current_pose(context)
+            context.task_state.record_motion_progress(
+                call.function.name, before_pose, after_pose,
+                rotation_degrees=tool_result.get("degrees"),
+            )
+        if view_changed:
+            context.observation = None
+            context.depth_rules = None
+            if context.task_state is not None:
+                context.task_state.clear_observation()
         _compact_history(messages)
 
     return _stop_with_message(context, "本轮工具调用次数过多，已停止。", safety_stop=True)
@@ -117,11 +120,15 @@ def append_observation(
     context: ToolContext,
     messages: list[dict[str, Any]],
     snapshot: ObservationSnapshot,
+    *,
+    prompt: str | None = None,
+    rules: Any | None = None,
 ) -> None:
-    """绑定同号深度规则并追加一条图片和摘要同在的消息。"""
-    rules = compute_depth_rules(snapshot, context.profile.observation,
-                                context.profile.safety.max_relative_move_m)
-    message = build_observation_message(snapshot, rules)
+    """把 observe 得到的同号图、提示和深度摘要追加给同一模型。"""
+    if rules is None:
+        rules = compute_depth_rules(snapshot, context.profile.observation,
+                                    context.profile.forward_step_limit_m)
+    message = build_observation_message(snapshot, rules, prompt)
     context.observation = snapshot
     context.depth_rules = rules
     if context.task_state is not None:
@@ -146,9 +153,57 @@ def _assistant_tool_message(message: Any, tool_calls: list[Any]) -> dict[str, An
 
 
 def _compact_history(messages: list[dict[str, Any]]) -> None:
-    """只留目标和最近一次动作前后两张图及配对工具结果。"""
-    if len(messages) > 6:
-        messages[:] = messages[:2] + messages[-4:]
+    """只留目标及最近两组完整工具调用，避免拆散结果配对。"""
+    if len(messages) <= 8:
+        return
+    groups: list[list[dict[str, Any]]] = []
+    for message in messages[2:]:
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            groups.append([])
+        if not groups:
+            groups.append([])
+        groups[-1].append(message)
+    messages[:] = messages[:2] + [item for group in groups[-2:] for item in group]
+
+
+def _current_pose(context: ToolContext) -> tuple[float, float, float] | None:
+    """读取控制器当前三轴位姿，供无图时计算动作进展。"""
+    resolver = getattr(context.controller, "current_position_ned", None)
+    try:
+        pose = resolver() if callable(resolver) else None
+    except Exception:
+        return None
+    return _valid_pose(pose)
+
+
+def _valid_pose(pose: Any) -> tuple[float, float, float] | None:
+    """只接受三个有限数值组成的 NED 位姿。"""
+    if not isinstance(pose, (list, tuple)) or len(pose) != 3:
+        return None
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+           for value in pose):
+        return None
+    return tuple(float(value) for value in pose)
+
+
+def _result_pose(result: dict[str, Any]) -> tuple[float, float, float] | None:
+    """优先使用工具明确回报的最终位姿。"""
+    return _valid_pose(result.get("final_position_ned"))
+
+
+def _motion_changed_view(tool_name: str, result: dict[str, Any]) -> bool:
+    """判断成功工具是否应清掉动作前的视觉与深度规则。"""
+    if tool_name == "forward" and result.get("motion_executed") is False:
+        return False
+    if tool_name == "rotate":
+        degrees = result.get("degrees")
+        return (
+            isinstance(degrees, (int, float))
+            and not isinstance(degrees, bool)
+            and math.isfinite(degrees)
+            and degrees > 0
+        )
+    return tool_name in {"takeoff", "forward", "up", "down"}
 
 
 def _stop_with_message(context: ToolContext, assistant_text: str, *, safety_stop: bool = False) -> str:

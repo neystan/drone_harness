@@ -26,7 +26,6 @@ observation:
   measurement_margin_m: 0.15
   braking_margin_m: 25.0
   latency_margin_m: 0.25
-  coverage_min_fraction: 1.0
   side_obstacle_distance_m: 2.0
 
 safety:

@@ -38,7 +38,7 @@ def create_llm_client(profile: RuntimeProfile) -> Any:
     return OpenAI(
         api_key=profile.llm.api_key,
         base_url=normalize_chat_base_url(profile.llm.base_url),
-        timeout=20.0,
+        timeout=60.0,
         max_retries=0,
     )
 

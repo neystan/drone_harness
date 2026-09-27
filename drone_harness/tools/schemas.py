@@ -1,4 +1,4 @@
-"""定义单目标闭环的四个模型可见动作 schema。"""
+"""定义单目标闭环的模型可见动作 schema。"""
 
 from __future__ import annotations
 
@@ -21,13 +21,13 @@ FORWARD_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "forward",
-        "description": "Move a short distance only along the current forward direction when depth rules allow it.",
+        "description": "只沿当前朝向前进。程序在每次调用时读取新深度并计算上限；深度失效则执行 0 米，超限则缩短并反馈。",
         "parameters": {
             "type": "object",
             "properties": {
                 "distance_m": {
                     "type": "number",
-                    "description": "Positive forward distance in meters, no greater than this observation's limit.",
+                    "description": "请求的正向米数；仿真单次最多按 19 米与本次深度上限中较小者执行。",
                 }
             },
             "required": ["distance_m"],
@@ -90,7 +90,27 @@ LAND_TOOL_SCHEMA = {
     },
 }
 
+OBSERVE_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "observe",
+        "description": "按需获取当前 RGB 图像和同帧深度规则，交给同一个模型查看；不会飞行。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "说明本次想从画面里寻找或确认什么，去掉首尾空白后为 1 到 1000 字符。",
+                }
+            },
+            "required": ["prompt"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 TOOL_SCHEMAS = [
+    OBSERVE_TOOL_SCHEMA,
     TAKEOFF_TOOL_SCHEMA,
     FORWARD_TOOL_SCHEMA,
     UP_TOOL_SCHEMA,
@@ -101,5 +121,5 @@ TOOL_SCHEMAS = [
 
 
 def get_tool_schemas() -> list[dict]:
-    """返回注册给同一多模态模型的六个飞行动作。"""
+    """返回一个观察工具与六个飞行动作的 schema。"""
     return list(TOOL_SCHEMAS)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from drone_harness.bus.intervention import interrupt_if_requested
@@ -19,7 +19,8 @@ from drone_harness.runtime.safety import (
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.tools.registry import ToolContext, get_tool_definition
 from drone_harness.tools import flight
-from drone_harness.vision.depth_rules import compute_depth_rules
+
+HITL_CONFIRM_TIMEOUT_S = 120.0
 
 
 def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
@@ -96,7 +97,7 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
         initial_state = _approval_state(context)
         if initial_state is None:
             result = {"success": False, "error": "APPROVAL_OBSERVATION_INVALID",
-                      "message": "approval requires fresh RGB-D and flight state"}
+                      "message": "approval requires a bound observation and flight state"}
             log_tool_call(context.profile, context.session_id, tool_name, arguments, result)
             _update_task_state(context, "tool_finished", tool_name, result=result)
             return result
@@ -120,7 +121,7 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
             raise EndCurrentTurn(str(exc), result) from exc
         if _approval_state(context) != initial_state:
             result = {"success": False, "error": "APPROVAL_STATE_CHANGED",
-                      "message": "observation, limit or flight state changed during approval"}
+                      "message": "bound observation, limit or flight state changed during approval"}
             log_tool_call(context.profile, context.session_id, tool_name, arguments, result)
             _update_task_state(context, "tool_finished", tool_name, result=result)
             return result
@@ -213,7 +214,7 @@ def _confirm_flight_tool(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> None:
-    """在观测有效期内通过消息总线等待逐动作人工确认。"""
+    """按独立于观测帧龄的期限等待逐动作人工确认。"""
     if context.message_bus is None:
         raise EndCurrentTurn(
             f"已取消本次 {tool_name} 执行。",
@@ -224,10 +225,11 @@ def _confirm_flight_tool(
             },
         )
     snapshot = context.observation
-    oldest_stamp_ns = min(snapshot.rgb_stamp_ns, snapshot.depth_stamp_ns or snapshot.rgb_stamp_ns)
-    expiry_ns = oldest_stamp_ns + int(context.profile.observation.max_frame_age_s * 1e9)
+    expiry = time.monotonic() + HITL_CONFIRM_TIMEOUT_S
+    expiry_label = (datetime.now().astimezone() + timedelta(seconds=HITL_CONFIRM_TIMEOUT_S)).isoformat(
+        timespec="seconds")
     if tool_name == "forward":
-        limit = f"{context.depth_rules.forward_max_m:.2f}m"
+        limit = f"{min(context.depth_rules.forward_max_m, context.profile.forward_step_limit_m):.2f}m"
     elif tool_name == "takeoff":
         limit = f"{context.profile.safety.max_takeoff_height_m:.2f}m"
     elif tool_name in {"up", "down"}:
@@ -239,18 +241,18 @@ def _confirm_flight_tool(
     prompt = (
         f"human-in-the-loop> 动作={tool_name} 参数={json.dumps(arguments, ensure_ascii=False)} "
         f"观测号={snapshot.observation_id} 上限={limit} "
-        f"有效期至={datetime.fromtimestamp(expiry_ns / 1e9).astimezone().isoformat(timespec='seconds')} "
+        f"确认期限至={expiry_label} "
         "| 执行该飞行动作？[Y/N]: "
     )
     print(prompt, flush=True)
-    while time.time_ns() <= expiry_ns:
+    while time.monotonic() <= expiry:
         response = context.message_bus.get_next_user_message()
         if response is None:
             time.sleep(0.05)
             continue
         answer = response.content.strip().lower()
         if answer == "y":
-            if time.time_ns() <= expiry_ns:
+            if time.monotonic() <= expiry:
                 return
             break
         if answer == "n":
@@ -264,49 +266,37 @@ def _confirm_flight_tool(
             )
         print("human-in-the-loop> 请输入 Y 或 N。")
     raise EndCurrentTurn(
-        f"{tool_name} 人工确认已过有效期，未执行。",
+        f"{tool_name} 人工确认已过期限，未执行。",
         {"success": False, "error": "HUMAN_IN_THE_LOOP_EXPIRED",
          "message": "approval expired before confirmation"},
     )
 
 
 def _approval_state(context: ToolContext) -> tuple[Any, ...] | None:
-    """捕获审批前后必须完全一致的观测号、限额及飞控状态。"""
+    """绑定 A 观测、数值上限与飞控状态，不按等待帧龄重算深度。"""
     snapshot = context.observation
     rules = context.depth_rules
     if snapshot is None or rules is None or rules.observation_id != snapshot.observation_id:
         return None
-    age_ns = time.time_ns() - snapshot.rgb_stamp_ns
-    max_age_ns = int(context.profile.observation.max_frame_age_s * 1e9)
-    if not (-int(context.profile.observation.max_clock_skew_s * 1e9) <= age_ns <= max_age_ns):
+    if snapshot.rgb_stamp_ns <= 0:
         return None
-    if snapshot.depth_stamp_ns is not None:
-        depth_age_ns = time.time_ns() - snapshot.depth_stamp_ns
-        if not (-int(context.profile.observation.max_clock_skew_s * 1e9) <= depth_age_ns <= max_age_ns):
-            return None
-    latest_observation = getattr(context.controller, "latest_observation", None)
-    latest = latest_observation() if latest_observation is not None else None
-    if latest is None or latest.observation_id != snapshot.observation_id:
-        return None
-    if not 0 <= time.monotonic_ns() - latest.received_monotonic_ns <= max_age_ns:
-        return None
-    if latest.pose_age_s is None or latest.pose_age_s > context.profile.observation.max_frame_age_s:
-        return None
-    latest_rules = compute_depth_rules(latest, context.profile.observation,
-                                       context.profile.safety.max_relative_move_m)
     status = getattr(context.controller, "vehicle_status", None)
     resolver = getattr(context.controller, "flight_state", None)
     if status is None or resolver is None:
         return None
     return (
         snapshot.observation_id,
+        id(snapshot),
+        snapshot.rgb_stamp_ns,
         snapshot.depth_stamp_ns,
-        latest.depth_stamp_ns,
+        id(rules),
+        rules.depth_valid,
         rules.forward_max_m,
-        latest_rules.depth_valid,
-        latest_rules.forward_max_m,
-        latest_rules.reason,
-        context.profile.safety.max_relative_move_m,
+        rules.reason,
+        context.profile.forward_step_limit_m,
+        context.profile.safety.max_takeoff_height_m,
+        context.profile.safety.max_vertical_move_m,
+        context.profile.safety.max_rotation_deg,
         bool(getattr(status, "connected", False)),
         bool(getattr(status, "armed", False)),
         getattr(status, "mode", None),

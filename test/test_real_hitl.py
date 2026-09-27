@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,7 +20,8 @@ def real_context(tmp_path: Path):
     """构造只在测试中使用的已校准真机 profile 替身。"""
     context = forward_context(tmp_path)
     safety = replace(context.profile.safety, human_in_the_loop_for_flight_tools=True,
-                     human_in_the_loop_exempt_flight_tools=frozenset({"rotate", "land"}))
+                     human_in_the_loop_exempt_flight_tools=frozenset({"rotate", "land"}),
+                     max_relative_move_m=0.2)
     context.profile = replace(context.profile, mode="real", safety=safety)
     context.task_state.start_new_goal("test")
     return context
@@ -49,30 +51,69 @@ def test_real_four_actions_all_require_individual_approval(
     handler.assert_called_once()
     prompt = capsys.readouterr().out
     assert f"动作={name}" in prompt
-    assert "观测号=" in prompt and "上限=" in prompt and "有效期至=" in prompt
+    assert "观测号=" in prompt and "上限=" in prompt and "确认期限至=" in prompt
+    if name == "forward":
+        assert "上限=0.20m" in prompt
     if name == "land":
         assert context.task_state.landing_authorized
 
 
-def test_approval_rejects_depth_limit_change_before_execution(tmp_path: Path, monkeypatch) -> None:
-    """等待人工期间最新深度缩小上限，即使回复 Y 也零动作。"""
+def test_approval_does_not_recalculate_new_sensor_frame(tmp_path: Path, monkeypatch) -> None:
+    """审批期间后台新帧变化不替换 VLM 已使用的 A 规则。"""
     context = real_context(tmp_path)
-    latest = [context.observation]
-    context.controller.latest_observation = lambda: latest[0]
-    near_depth = context.observation.depth.copy()
-    near_depth[5, 7] = 0.5
+    context.controller.latest_observation = Mock(side_effect=AssertionError("B frame was fetched"))
+    context.message_bus = SimpleNamespace(get_next_user_message=lambda: SimpleNamespace(content="y"),
+                                          has_pending_user_message=lambda: False)
+    handler = Mock(return_value={"success": True})
+    monkeypatch.setattr(dispatcher, "get_tool_definition", lambda _name: SimpleNamespace(handler=handler))
+    result = dispatcher.dispatch_tool_call(context, tool_call("forward"))
+    assert result["success"]
+    handler.assert_called_once()
 
-    def answer_after_depth_change():
-        """模拟用户批准到来前近障进入相机视野。"""
-        latest[0] = replace(context.observation, depth=near_depth)
+
+def test_approval_rejects_bound_a_limit_change(tmp_path: Path, monkeypatch) -> None:
+    """人工确认期间 A 的上限被替换时拒绝执行。"""
+    context = real_context(tmp_path)
+
+    def answer_after_a_change():
+        """模拟审批等待期间 A 规则被替换。"""
+        context.depth_rules = replace(context.depth_rules, forward_max_m=0.0)
         return SimpleNamespace(content="y")
 
-    context.message_bus = SimpleNamespace(get_next_user_message=answer_after_depth_change,
+    context.message_bus = SimpleNamespace(get_next_user_message=answer_after_a_change,
                                           has_pending_user_message=lambda: False)
     handler = Mock(return_value={"success": True})
     monkeypatch.setattr(dispatcher, "get_tool_definition", lambda _name: SimpleNamespace(handler=handler))
     result = dispatcher.dispatch_tool_call(context, tool_call("forward"))
     assert result["error"] == "APPROVAL_STATE_CHANGED"
+    handler.assert_not_called()
+
+
+def test_approval_does_not_use_a_frame_age_as_deadline(tmp_path: Path, monkeypatch) -> None:
+    """模型思考十秒后仍能人工批准，确认期限从提问时起算。"""
+    context = real_context(tmp_path)
+    context.observation = replace(context.observation,
+                                  rgb_stamp_ns=time.time_ns() - 10_000_000_000,
+                                  depth_stamp_ns=time.time_ns() - 10_000_000_000)
+    context.message_bus = SimpleNamespace(get_next_user_message=lambda: SimpleNamespace(content="y"),
+                                          has_pending_user_message=lambda: False)
+    handler = Mock(return_value={"success": True})
+    monkeypatch.setattr(dispatcher, "get_tool_definition", lambda _name: SimpleNamespace(handler=handler))
+    assert dispatcher.dispatch_tool_call(context, tool_call("forward"))["success"]
+    handler.assert_called_once()
+
+
+def test_approval_interaction_timeout_stops_without_action(tmp_path: Path, monkeypatch) -> None:
+    """人工确认自身过期时不执行动作，与 A 的采集时间无关。"""
+    context = real_context(tmp_path)
+    context.message_bus = SimpleNamespace(get_next_user_message=lambda: None,
+                                          has_pending_user_message=lambda: False)
+    handler = Mock(return_value={"success": True})
+    monkeypatch.setattr(dispatcher, "get_tool_definition", lambda _name: SimpleNamespace(handler=handler))
+    monkeypatch.setattr(dispatcher, "HITL_CONFIRM_TIMEOUT_S", 0.001)
+    with pytest.raises(EndCurrentTurn) as captured:
+        dispatcher.dispatch_tool_call(context, tool_call("forward"))
+    assert captured.value.tool_result["error"] == "HUMAN_IN_THE_LOOP_EXPIRED"
     handler.assert_not_called()
 
 

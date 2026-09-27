@@ -16,7 +16,7 @@ from drone_harness.runtime.observation import CameraIntrinsics, ObservationBuffe
 def observation_config() -> ObservationConfig:
     """构造供同步测试使用的保守观测配置。"""
     return ObservationConfig(1.0, 0.05, 0.01, 0.01, "perspective_ray_m", 20.0, 0.5, 0.55,
-                             0.45, 0.30, 0.15, 0.2, 0.1, 1.0, 2.0)
+                             0.45, 0.30, 0.15, 0.2, 0.1, 2.0)
 
 
 def add_pair(buffer: ObservationBuffer, stamp_ns: int, depth_delta_ns: int = 0) -> None:

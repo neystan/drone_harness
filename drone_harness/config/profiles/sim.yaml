@@ -19,6 +19,7 @@ observation:
   max_sync_delta_s: 0.05
   max_clock_skew_s: 0.05
   wait_timeout_s: 2.0
+  # 仅 scene 9/13/21/24 已抽测米制；scene 7 的旧起点不可用于自主前进。
   depth_semantics: perspective_ray_m
   depth_max_m: 20.0
   camera_forward_offset_m: 0.5
@@ -26,16 +27,16 @@ observation:
   body_half_width_m: 0.45
   body_half_height_m: 0.30
   measurement_margin_m: 0.15
-  # 制动/超调尚未标定；此暂定值大于最大深度，保证自主前进上限为零。
-  braking_margin_m: 25.0
+  # 与测量 0.15m、延迟 0.25m 合计预留 1m 的计划净空；并非实测停距保证。
+  braking_margin_m: 0.60
   latency_margin_m: 0.25
-  coverage_min_fraction: 1.0
   side_obstacle_distance_m: 2.0
 
 safety:
   human_in_the_loop_for_flight_tools: false
   max_takeoff_height_m: 10
   max_relative_move_m: 0.3
+  max_forward_m: 19.0
   max_vertical_move_m: 10
   max_rotation_deg: 360
   action_timeout_s: 30

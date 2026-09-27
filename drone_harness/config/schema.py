@@ -64,7 +64,6 @@ class ObservationConfig:
     measurement_margin_m: float
     braking_margin_m: float
     latency_margin_m: float
-    coverage_min_fraction: float
     side_obstacle_distance_m: float
 
     def __post_init__(self) -> None:
@@ -94,8 +93,6 @@ class ObservationConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value < 0:
                 raise ValueError(f"observation.{name} must be finite and nonnegative")
-        if not math.isfinite(self.coverage_min_fraction) or not 0 < self.coverage_min_fraction <= 1:
-            raise ValueError("observation.coverage_min_fraction must be in (0, 1]")
         if self.depth_semantics not in {"perspective_ray_m", "unverified"}:
             raise ValueError("observation.depth_semantics is unsupported")
 
@@ -134,6 +131,7 @@ class SafetyConfig:
     require_battery_status_for_takeoff: bool
     min_battery_percent_for_takeoff: float
     require_px4_status_ready_for_takeoff: bool
+    max_forward_m: float | None = None
 
     def __post_init__(self) -> None:
         """校验飞行阈值均为有限正数，避免 NaN 绕过限额。"""
@@ -142,6 +140,12 @@ class SafetyConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
+        if self.max_forward_m is not None and (
+            isinstance(self.max_forward_m, bool)
+            or not math.isfinite(self.max_forward_m)
+            or self.max_forward_m <= 0
+        ):
+            raise ValueError("max_forward_m must be finite and positive")
         if (isinstance(self.min_battery_percent_for_takeoff, bool)
                 or not math.isfinite(self.min_battery_percent_for_takeoff)
                 or not 0.0 <= self.min_battery_percent_for_takeoff <= 100.0):
@@ -166,3 +170,10 @@ class RuntimeProfile:
             raise ValueError("profile name must be 'sim' or 'real'")
         if self.mode not in {"simulation", "real"}:
             raise ValueError("profile mode must be 'simulation' or 'real'")
+
+    @property
+    def forward_step_limit_m(self) -> float:
+        """仅仿真使用独立的正向步长，真机沿用原相对位移限额。"""
+        if self.mode == "simulation" and self.safety.max_forward_m is not None:
+            return self.safety.max_forward_m
+        return self.safety.max_relative_move_m

@@ -143,7 +143,6 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
             measurement_margin_m=float(observation["measurement_margin_m"]),
             braking_margin_m=float(observation["braking_margin_m"]),
             latency_margin_m=float(observation["latency_margin_m"]),
-            coverage_min_fraction=float(observation["coverage_min_fraction"]),
             side_obstacle_distance_m=float(observation["side_obstacle_distance_m"]),
         ),
         llm=ProviderConfig(
@@ -160,6 +159,8 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
             ),
             max_takeoff_height_m=float(safety["max_takeoff_height_m"]),
             max_relative_move_m=float(safety["max_relative_move_m"]),
+            max_forward_m=(float(safety["max_forward_m"])
+                           if safety.get("max_forward_m") is not None else None),
             max_vertical_move_m=float(safety["max_vertical_move_m"]),
             max_rotation_deg=float(safety["max_rotation_deg"]),
             action_timeout_s=float(safety["action_timeout_s"]),

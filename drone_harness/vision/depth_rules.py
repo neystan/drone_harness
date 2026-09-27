@@ -1,4 +1,4 @@
-"""把已校准的透视深度转换为机体前方净空与短步上限。"""
+"""把已校准的透视深度转换为机体前方净空与单步上限。"""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ class DepthRules:
     left_front: str
     right_front: str
     reason: str
+    front_obstacle_m: float | None = None
 
     def as_text(self) -> str:
         """生成给同一 VLM 阅读的简短有单位摘要。"""
@@ -34,6 +35,7 @@ class DepthRules:
             f"observation_id={self.observation_id}; "
             f"depth_valid={str(self.depth_valid).lower()}; "
             f"front_clearance={clearance}; forward_max={self.forward_max_m:.2f}m; "
+            f"front_obstacle={'none_within_horizon' if self.front_obstacle_m is None else f'{self.front_obstacle_m:.2f}m'}; "
             f"left_front={self.left_front}; right_front={self.right_front}; "
             f"reason={self.reason or 'ok'}"
         )
@@ -88,11 +90,9 @@ def compute_depth_rules(
     ):
         return invalid_depth_rules(observation_id, "PROFILE_STEP_LIMIT_INVALID")
 
+    # 有限正深度超过量程时，只能证明该射线在量程内未遇到表面。
     valid = np.isfinite(depth) & (depth > 0)
-    coverage = float(np.count_nonzero(valid)) / depth.size
-    if coverage < config.coverage_min_fraction:
-        return invalid_depth_rules(observation_id, "DEPTH_COVERAGE_INSUFFICIENT")
-    # 保守策略：通道内任何未知像素都不可视为自由空间。
+    # 保守策略：飞行通道内任何无法解释的像素都不可视为自由空间。
     near_plane_m = 0.10
     columns = (np.arange(intrinsics.width, dtype=np.float64) - intrinsics.cx) / intrinsics.fx
     rows = (np.arange(intrinsics.height, dtype=np.float64) - intrinsics.cy) / intrinsics.fy
@@ -118,6 +118,11 @@ def compute_depth_rules(
     if not np.any(inside_body_corridor):
         return invalid_depth_rules(observation_id, "DEPTH_CORRIDOR_NOT_OBSERVED")
     clearance_m = max(0.0, float(np.min(front_clearance[inside_body_corridor])))
+    detected_obstacles = inside_body_corridor & (depth < config.depth_max_m)
+    nearest_obstacle_m = (
+        max(0.0, float(np.min(front_clearance[detected_obstacles])))
+        if np.any(detected_obstacles) else None
+    )
     remaining_m = (
         clearance_m
         - config.measurement_margin_m
@@ -140,4 +145,5 @@ def compute_depth_rules(
         left_front=left_front,
         right_front=right_front,
         reason="",
+        front_obstacle_m=nearest_obstacle_m,
     )

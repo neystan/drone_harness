@@ -11,7 +11,7 @@ from drone_harness.bus import InputServer, MessageBus
 from drone_harness.config.loader import load_profile
 from drone_harness.logging.task_log import create_session_id, log_agent_message, log_task_state
 from drone_harness.llm.client import create_llm_client
-from drone_harness.llm.prompts import SYSTEM_PROMPT
+from drone_harness.llm.prompts import build_system_prompt
 from drone_harness.runtime.task_state import TaskState, format_task_state_line
 from drone_harness.runtime.safety import SafetyHandoffRequired
 from drone_harness.runtime.terminal import open_input_terminal
@@ -100,7 +100,7 @@ def _start_live_runtime(profile) -> None:
         )
         executor_thread.start()
         input_terminal_started = _start_input_terminal(input_server, profile.name)
-        log_agent_message(profile, context.session_id, "system", SYSTEM_PROMPT)
+        log_agent_message(profile, context.session_id, "system", build_system_prompt(profile))
         _run_interactive_loop(
             client,
             profile.llm.model,
@@ -169,21 +169,11 @@ def _run_interactive_loop(
             break
         if context.task_state is not None:
             context.task_state.start_new_goal(user_input)
-        messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        context.observation = None
+        context.depth_rules = None
+        messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt(context.profile)}]
         messages.append({"role": "user", "content": user_input})
         log_agent_message(context.profile, context.session_id, "user", user_input)
-        wait_for_observation = getattr(context.controller, "wait_for_observation", None)
-        snapshot = wait_for_observation() if wait_for_observation is not None else None
-        if snapshot is None:
-            print("agent> 当前没有可用的前视 RGB，未请求模型。")
-            continue
-        from drone_harness.runtime.agent_loop import append_observation
-
-        try:
-            append_observation(context, messages, snapshot)
-        except ValueError as exc:
-            print(f"agent> 观测不可用，未请求模型：{exc}")
-            continue
         agent_loop(client, model, messages, context)
 
 
