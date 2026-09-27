@@ -7,9 +7,9 @@ from drone_harness.tools.registry import get_tool_definition, get_tool_definitio
 from drone_harness.tools.schemas import get_tool_schemas
 
 
-def test_model_tool_surface_is_exactly_four_actions() -> None:
+def test_model_tool_surface_is_exactly_six_actions() -> None:
     """旧状态、视觉和任意位移工具均不可再被模型调用。"""
-    expected = {"takeoff", "forward", "rotate", "land"}
+    expected = {"takeoff", "forward", "up", "down", "rotate", "land"}
     assert {tool.name for tool in get_tool_definitions()} == expected
     assert {schema["function"]["name"] for schema in get_tool_schemas()} == expected
     for removed in (

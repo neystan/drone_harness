@@ -230,6 +230,8 @@ def _confirm_flight_tool(
         limit = f"{context.depth_rules.forward_max_m:.2f}m"
     elif tool_name == "takeoff":
         limit = f"{context.profile.safety.max_takeoff_height_m:.2f}m"
+    elif tool_name in {"up", "down"}:
+        limit = f"{context.profile.safety.max_vertical_move_m:.2f}m/次"
     elif tool_name == "rotate":
         limit = f"{context.profile.safety.max_rotation_deg:.1f}deg"
     else:

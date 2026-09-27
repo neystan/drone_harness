@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -151,9 +152,16 @@ class TaskState:
         tool_name: str,
         before_ned: tuple[float, float, float] | None,
         after_ned: tuple[float, float, float] | None,
+        *,
+        rotation_degrees: float | None = None,
     ) -> None:
-        """用前后位姿更新平移进展计数，不以模型自评代替测量。"""
-        if tool_name not in {"takeoff", "forward"}:
+        """平移按位姿计数；成功非零转向允许重新探索。"""
+        if tool_name == "rotate":
+            if (isinstance(rotation_degrees, (int, float)) and not isinstance(rotation_degrees, bool)
+                    and math.isfinite(rotation_degrees) and rotation_degrees > 0):
+                self.consecutive_no_progress = 0
+            return
+        if tool_name not in {"takeoff", "forward", "up", "down"}:
             return
         if before_ned is None or after_ned is None:
             self.consecutive_no_progress += 1

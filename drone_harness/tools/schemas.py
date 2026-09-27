@@ -36,6 +36,34 @@ FORWARD_TOOL_SCHEMA = {
     },
 }
 
+UP_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "up",
+        "description": "仅在空中上升；distance_m 是本次米数，必须为正且不超过当前 profile 的单次垂直限额。可多次调用，不设累计高度上限；不检查上方障碍。",
+        "parameters": {
+            "type": "object",
+            "properties": {"distance_m": {"type": "number", "description": "本次上升的正距离，单位米。"}},
+            "required": ["distance_m"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+DOWN_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "down",
+        "description": "仅在空中下降；distance_m 是本次米数，必须为正且不超过当前 profile 的单次垂直限额。不检查下方障碍；目标高度不得低于离地 0.3 米，落地请调用 land。",
+        "parameters": {
+            "type": "object",
+            "properties": {"distance_m": {"type": "number", "description": "本次下降的正距离，单位米。"}},
+            "required": ["distance_m"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 ROTATE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -65,11 +93,13 @@ LAND_TOOL_SCHEMA = {
 TOOL_SCHEMAS = [
     TAKEOFF_TOOL_SCHEMA,
     FORWARD_TOOL_SCHEMA,
+    UP_TOOL_SCHEMA,
+    DOWN_TOOL_SCHEMA,
     ROTATE_TOOL_SCHEMA,
     LAND_TOOL_SCHEMA,
 ]
 
 
 def get_tool_schemas() -> list[dict]:
-    """返回注册给同一多模态模型的四个工具 schema。"""
+    """返回注册给同一多模态模型的六个飞行动作。"""
     return list(TOOL_SCHEMAS)

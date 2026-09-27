@@ -707,6 +707,46 @@ def forward(context: Any, distance_m: Any) -> dict[str, Any]:
                 guard=lambda target: _forward_motion_guard(context, target))
 
 
+def _vertical_move(context: Any, distance_m: Any, *, upward: bool) -> dict[str, Any]:
+    """校验一次纯垂直位移后复用原 move，不检查上下方向深度。"""
+    if not is_finite_number(distance_m):
+        return {"success": False, "error": "INVALID_VERTICAL_DISTANCE",
+                "message": "distance_m must be a finite number"}
+    distance = float(distance_m)
+    if distance <= 0:
+        return {"success": False, "error": "INVALID_VERTICAL_DISTANCE",
+                "message": "distance_m must be positive"}
+    limit = context.profile.safety.max_vertical_move_m
+    if distance > limit:
+        return {"success": False, "error": "VERTICAL_LIMIT_EXCEEDED",
+                "message": f"distance_m exceeds the {limit:g} m per-call vertical limit",
+                "vertical_max_m": limit}
+    controller = context.controller
+    state = _flight_state(controller)
+    if state != "IN_AIR":
+        return _flight_state_unavailable() if state is None else {
+            "success": False, "error": "NOT_IN_AIR", "message": "up/down requires confirmed airborne state"}
+    status = getattr(controller, "vehicle_status", None)
+    mode = getattr(status, "mode", None)
+    allowed_modes = {"OFFBOARD", "AUTO.LOITER"} if context.profile.mode == "simulation" else {"OFFBOARD"}
+    if not (bool(getattr(status, "connected", False)) and bool(getattr(status, "armed", False))
+            and mode in allowed_modes):
+        return {"success": False, "error": "PX4_STATE_INVALID",
+                "message": f"PX4 must be connected and armed in {', '.join(sorted(allowed_modes))}; current mode={mode}"}
+    return move(context, 0.0, 0.0, -distance if upward else distance,
+                completion_tolerance_m=min(0.05, distance / 2.0))
+
+
+def up(context: Any, distance_m: Any) -> dict[str, Any]:
+    """在空中按单次垂直限额上升，不设置累计高度上限。"""
+    return _vertical_move(context, distance_m, upward=True)
+
+
+def down(context: Any, distance_m: Any) -> dict[str, Any]:
+    """在空中下降，近地目标继续由原 move 拒绝。"""
+    return _vertical_move(context, distance_m, upward=False)
+
+
 def move(
     context: Any,
     x: float,
@@ -714,6 +754,7 @@ def move(
     z: float,
     *,
     guard: Callable[[list[float]], str | None] | None = None,
+    completion_tolerance_m: float | None = None,
 ) -> dict:
     """按机体系 FRD 偏移执行相对移动。"""
     controller = context.controller
@@ -827,11 +868,12 @@ def move(
             interrupted = interrupt_if_requested(context, hover_on_flight_tool=True)
             if interrupted is not None:
                 return interrupted
-        reached_target = (
-            controller.is_at_target(target_position)
-            if guard is None
-            else math.dist(controller.current_position_ned(), target_position) <= 0.05
-        )
+        if completion_tolerance_m is not None:
+            reached_target = math.dist(controller.current_position_ned(), target_position) <= completion_tolerance_m
+        elif guard is None:
+            reached_target = controller.is_at_target(target_position)
+        else:
+            reached_target = math.dist(controller.current_position_ned(), target_position) <= 0.05
         if reached_target:
             if guard is None:
                 time.sleep(0.5)

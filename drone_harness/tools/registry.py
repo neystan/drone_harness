@@ -12,10 +12,12 @@ from drone_harness.runtime.task_state import TaskState
 from drone_harness.vision.depth_rules import DepthRules
 from . import flight
 from .schemas import (
+    DOWN_TOOL_SCHEMA,
     FORWARD_TOOL_SCHEMA,
     LAND_TOOL_SCHEMA,
     ROTATE_TOOL_SCHEMA,
     TAKEOFF_TOOL_SCHEMA,
+    UP_TOOL_SCHEMA,
     get_tool_schemas,
 )
 
@@ -54,6 +56,16 @@ def _forward_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     return flight.forward(context, arguments.get("distance_m"))
 
 
+def _up_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
+    """沿用底层 move 执行纯上升。"""
+    return flight.up(context, arguments.get("distance_m"))
+
+
+def _down_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
+    """沿用底层 move 执行纯下降。"""
+    return flight.down(context, arguments.get("distance_m"))
+
+
 def _rotate_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     """沿用现有定点转向实现。"""
     return flight.rotate(context, arguments.get("direction"), arguments.get("degrees"))
@@ -67,6 +79,8 @@ def _land_handler(context: ToolContext, _arguments: dict[str, Any]) -> dict:
 TOOL_DEFINITIONS = [
     ToolDefinition("takeoff", TAKEOFF_TOOL_SCHEMA, _takeoff_handler),
     ToolDefinition("forward", FORWARD_TOOL_SCHEMA, _forward_handler),
+    ToolDefinition("up", UP_TOOL_SCHEMA, _up_handler),
+    ToolDefinition("down", DOWN_TOOL_SCHEMA, _down_handler),
     ToolDefinition("rotate", ROTATE_TOOL_SCHEMA, _rotate_handler),
     ToolDefinition("land", LAND_TOOL_SCHEMA, _land_handler),
 ]
@@ -74,7 +88,7 @@ TOOL_DEFINITION_BY_NAME = {definition.name: definition for definition in TOOL_DE
 
 
 def get_tool_definitions() -> list[ToolDefinition]:
-    """返回模型当前可见的四个动作定义。"""
+    """返回模型当前可见的六个飞行动作定义。"""
     return list(TOOL_DEFINITIONS)
 
 

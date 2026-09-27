@@ -13,8 +13,8 @@ from test_agent_observation_loop import FakeClient, context_for
 from test_depth_rules import snapshot_at
 
 
-def test_one_request_contains_image_depth_summary_and_four_tools(tmp_path: Path) -> None:
-    """单一 chat.completions 请求同时携带图文和四动作 schema。"""
+def test_one_request_contains_image_depth_summary_and_six_tools(tmp_path: Path) -> None:
+    """单一 chat.completions 请求同时携带图文和六动作 schema。"""
     context = context_for(tmp_path)
     messages = [{"role": "system", "content": "test"}, {"role": "user", "content": "go"}]
     append_observation(context, messages, snapshot_at())
@@ -25,7 +25,7 @@ def test_one_request_contains_image_depth_summary_and_four_tools(tmp_path: Path)
     assert "forward_max=" in request[-1]["content"][0]["text"]
     assert request[-1]["content"][1]["type"] == "image_url"
     assert {schema["function"]["name"] for schema in get_tool_schemas()} == {
-        "takeoff", "forward", "rotate", "land"}
+        "takeoff", "forward", "up", "down", "rotate", "land"}
 
 
 def test_service_failure_causes_confirmed_hover_and_no_tool_dispatch(tmp_path: Path, monkeypatch) -> None:

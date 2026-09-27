@@ -11,6 +11,8 @@ from drone_harness.config.schema import RuntimeProfile
 FLIGHT_TOOL_NAMES = {
     "takeoff",
     "forward",
+    "up",
+    "down",
     "rotate",
     "land",
 }
