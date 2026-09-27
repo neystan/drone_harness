@@ -63,7 +63,13 @@ def agent_loop(
                 context.task_state.completion_candidate = assistant_text
             return assistant_text
 
+        assistant_text = message.content or ""
+        if not isinstance(assistant_text, str):
+            return _stop_with_message(context, "模型文本响应结构无效，已停止本轮。", safety_stop=True)
         messages.append(_assistant_tool_message(message, tool_calls))
+        if assistant_text:
+            print(f"agent> {assistant_text}")
+            log_agent_message(context.profile, context.session_id, "assistant", assistant_text)
         if len(tool_calls) != 1:
             refusal = {"success": False, "error": "MULTIPLE_TOOL_CALLS_REJECTED",
                        "message": "本轮模型提出多个动作，全部拒绝且未执行。"}
@@ -156,17 +162,15 @@ def _assistant_tool_message(message: Any, tool_calls: list[Any]) -> dict[str, An
 
 
 def _compact_history(messages: list[dict[str, Any]]) -> None:
-    """只留目标及最近两组完整工具调用，避免拆散结果配对。"""
-    if len(messages) <= 8:
-        return
-    groups: list[list[dict[str, Any]]] = []
-    for message in messages[2:]:
-        if message.get("role") == "assistant" and message.get("tool_calls"):
-            groups.append([])
-        if not groups:
-            groups.append([])
-        groups[-1].append(message)
-    messages[:] = messages[:2] + [item for group in groups[-2:] for item in group]
+    """完整保留本轮文字和工具记录，仅移除较早观测的图片。"""
+    image_messages = [index for index, message in enumerate(messages)
+                      if isinstance(message.get("content"), list)
+                      and any(part.get("type") == "image_url" for part in message["content"])]
+    for index in image_messages[:-1]:
+        message = messages[index]
+        content = [{"type": "text", "text": "历史观测（图片已移除）："}]
+        content.extend(part for part in message["content"] if part.get("type") != "image_url")
+        messages[index] = {**message, "content": content}
 
 
 def _current_pose(context: ToolContext) -> tuple[float, float, float] | None:

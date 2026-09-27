@@ -155,6 +155,7 @@ def _run_interactive_loop(
         print("输入自然语言与 agent 对话，输入 exit 退出。")
     _record_task_state(context)
 
+    conversation: list[dict[str, str]] = []
     while True:
         if context.task_state is not None and context.task_state.intervention_pending:
             user_input = context.task_state.intervention_message or ""
@@ -171,10 +172,26 @@ def _run_interactive_loop(
             context.task_state.start_new_goal(user_input)
         context.observation = None
         context.depth_rules = None
-        messages: list[dict[str, Any]] = [{"role": "system", "content": build_system_prompt(context.profile)}]
-        messages.append({"role": "user", "content": user_input})
+        conversation.append({"role": "user", "content": user_input})
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": build_system_prompt(context.profile)},
+            *conversation,
+        ]
+        turn_start = len(messages)
         log_agent_message(context.profile, context.session_id, "user", user_input)
-        agent_loop(client, model, messages, context)
+        answer = agent_loop(client, model, messages, context)
+        # 跨轮只带用户与 AI 文字，不带工具协议、执行结果或相机观测。
+        for message in messages[turn_start:]:
+            content = message.get("content")
+            if message.get("role") == "assistant" and isinstance(content, str) and content:
+                conversation.append({"role": "assistant", "content": content})
+        # 降落、失败和中断的返回说明未必已加入 messages，也需留给下轮。
+        last = messages[-1]
+        if isinstance(answer, str) and answer and not (
+            last.get("role") == "assistant" and not last.get("tool_calls")
+            and last.get("content") == answer
+        ):
+            conversation.append({"role": "assistant", "content": answer})
 
 
 def _start_input_terminal(input_server: InputServer, profile_name: str) -> bool:

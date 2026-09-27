@@ -255,7 +255,7 @@ def test_sim_forward_rechecks_px4_after_waiting_for_depth(tmp_path: Path, monkey
 
 
 def test_repeated_observe_keeps_complete_tool_pairs_and_bounded_images(tmp_path: Path) -> None:
-    """多次按需观察后仅保留最近两组完整工具调用与图像。"""
+    """多次观察保留所有工具配对和文字，仅发送最新图片。"""
     controller = SimpleNamespace(wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns))
     context = context_for(tmp_path, controller)
     messages = [{"role": "system", "content": "test"}, {"role": "user", "content": "找门"}]
@@ -267,9 +267,14 @@ def test_repeated_observe_keeps_complete_tool_pairs_and_bounded_images(tmp_path:
     assert "观察结束" in agent_loop(client, "test-vlm", messages, context)
     final_request = client.requests[-1]
     assert [item["role"] for item in final_request] == [
-        "system", "user", "assistant", "tool", "user", "assistant", "tool", "user"]
-    assert [item["tool_call_id"] for item in final_request if item["role"] == "tool"] == ["obs-1", "obs-2"]
-    assert sum(isinstance(item["content"], list) for item in final_request) == 2
+        "system", "user", "assistant", "tool", "user", "assistant", "tool", "user",
+        "assistant", "tool", "user"]
+    assert [item["tool_call_id"] for item in final_request if item["role"] == "tool"] == ["obs-0", "obs-1", "obs-2"]
+    images = [part for item in final_request if isinstance(item["content"], list)
+              for part in item["content"] if part["type"] == "image_url"]
+    assert len(images) == 1
+    for index in range(3):
+        assert f"看方向 {index}" in str(final_request)
     log_text = (tmp_path / "logs" / "session_test" / "tool_calls.jsonl").read_text()
     assert "data:image" not in log_text
 
