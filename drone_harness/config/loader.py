@@ -117,6 +117,7 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
         name=str(raw["name"]),
         mode=str(raw["mode"]),
         post_motion_wait_enabled=bool(raw.get("post_motion_wait_enabled", True)),
+        post_motion_wait_s=float(raw.get("post_motion_wait_s", 2.0)),
         ros=RosConfig(
             node_name=str(ros["node_name"]),
             camera_scene_topic=ros.get("camera_scene_topic"),

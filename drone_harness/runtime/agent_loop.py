@@ -18,7 +18,6 @@ from drone_harness.vision.depth_rules import compute_depth_rules
 
 MAX_TOOL_CALLS_PER_TURN = 50
 MAX_CONSECUTIVE_NO_PROGRESS = 3
-POST_MOTION_SETTLE_S = 2.0
 
 
 def agent_loop(
@@ -90,8 +89,9 @@ def agent_loop(
         if view_changed:
             if context.profile.post_motion_wait_enabled:
                 # 仅暂停规划线程，ROS executor 继续收数据、发布 setpoint。
-                print("tool> 动作完成，等待 2 秒稳定后继续规划。")
-                time.sleep(POST_MOTION_SETTLE_S)
+                wait_s = context.profile.post_motion_wait_s
+                print(f"tool> 动作完成，等待 {wait_s:g} 秒稳定后继续规划。")
+                time.sleep(wait_s)
             tool_result["observation_current"] = False
             tool_result["observation_note"] = "动作前的图像仅供历史参考；请调用 observe 重新观察后再规划。"
         messages.append(_build_tool_message(call.id, tool_result))

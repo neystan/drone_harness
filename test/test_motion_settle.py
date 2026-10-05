@@ -115,3 +115,22 @@ def test_yaml_switch_is_loaded_into_runtime_profile(enabled):
     raw["post_motion_wait_enabled"] = enabled
     settings = {"llm": {"api_key": "test-only", "base_url": "https://example.test/v4", "model": "test"}}
     assert _build_profile(raw, settings).post_motion_wait_enabled is enabled
+
+
+def test_custom_wait_duration_reaches_sleep(tmp_path, monkeypatch):
+    """配置中的自定义秒数实际传给 sleep，不再固定两秒。"""
+    root = Path(__file__).parents[1]
+    raw = yaml.safe_load((root / "drone_harness/config/profiles/sim.yaml").read_text())
+    raw["post_motion_wait_s"] = 1.5
+    settings = {"llm": {"api_key": "test-only", "base_url": "https://example.test/v4", "model": "test"}}
+    context = context_for(tmp_path)
+    context.profile = replace(context.profile, post_motion_wait_s=_build_profile(raw, settings).post_motion_wait_s)
+    sleep = Mock()
+    monkeypatch.setattr(loop_module, "time", SimpleNamespace(sleep=sleep))
+    monkeypatch.setattr(loop_module, "dispatch_tool_call", lambda *_args: {"success": True, "degrees": 30})
+    client = FakeClient([
+        SimpleNamespace(content="", tool_calls=[tool_call("rotate", {})]),
+        SimpleNamespace(content="继续", tool_calls=[]),
+    ])
+    loop_module.agent_loop(client, "test", [{"role": "user", "content": "找路口"}], context)
+    sleep.assert_called_once_with(1.5)

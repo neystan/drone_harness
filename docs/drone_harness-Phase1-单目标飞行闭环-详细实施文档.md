@@ -1,12 +1,12 @@
 # `drone_harness` Phase 1：单目标飞行闭环详细实施文档
 
-## 2026-10-05：可开关的动作后 2 秒等待
+## 2026-10-05：可开关、可修改秒数的动作后等待
 
-sim.yaml 和 real.yaml 顶层新增 post_motion_wait_enabled，默认 true；设为 false 后重启 harness 即关闭。成功起飞、前进、升降或非零旋转后，runtime 在把结果交给下一次模型规划之前固定 sleep 2 秒，使随后 observe 的取帧发生在等待之后。仅暂停规划线程，原后台 ROS executor 持续工作。
+sim.yaml 和 real.yaml 顶层新增 post_motion_wait_enabled，默认 true；设为 false 后重启 harness 即关闭。post_motion_wait_s 默认 2.0，是可以直接修改的等待秒数。成功起飞、前进、升降或非零旋转后，runtime 在把结果交给下一次模型规划之前按该秒数 sleep，使随后 observe 的取帧发生在等待之后。仅暂停规划线程，原后台 ROS executor 持续工作。
 
-复用现有动作改变视角的判断：前进执行 0 米、旋转 0 度、失败以及 observe/get_state/land 不触发等待。没有新增模型可调用的 timer 工具、稳定性检测、额外状态机或可调时长。旧 drone_agent 的 timer 是模型主动调用的计时工具，与此次自动等待不同。本次只增加开关和固定延迟。
+复用现有动作改变视角的判断：前进执行 0 米、旋转 0 度、失败以及 observe/get_state/land 不触发等待。没有新增模型可调用的 timer 工具、稳定性检测或额外状态机。旧 drone_agent 的 timer 是模型主动调用的计时工具，与此次自动等待不同；本次等待只用开关和秒数两行配置控制。
 
-全量离线回归 190 项通过；新增测试覆盖等待在下一次规划及新观测之前发生、关闭开关跳过等待和开关加载。compileall 与 git diff --check 通过，未启动仿真或请求真实模型。
+全量离线回归 191 项通过；新增测试覆盖等待在下一次规划及新观测之前发生、关闭开关跳过等待、开关加载和自定义秒数实际传给 sleep。compileall 与 git diff --check 通过，未启动仿真或请求真实模型。
 
 ## 2026-09-27：补齐 get_state 状态查询
 

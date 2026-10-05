@@ -164,6 +164,7 @@ class RuntimeProfile:
     llm: ProviderConfig
     safety: SafetyConfig
     post_motion_wait_enabled: bool = True
+    post_motion_wait_s: float = 2.0
 
     def __post_init__(self) -> None:
         """校验 profile 名称和运行模式是否合法。"""
