@@ -1,5 +1,6 @@
 name: real
 mode: real
+post_motion_wait_enabled: true  # 动作完成后等 2 秒再规划；false 关闭。
 
 ros:
   node_name: drone_harness_real

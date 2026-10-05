@@ -163,6 +163,7 @@ class RuntimeProfile:
     observation: ObservationConfig
     llm: ProviderConfig
     safety: SafetyConfig
+    post_motion_wait_enabled: bool = True
 
     def __post_init__(self) -> None:
         """校验 profile 名称和运行模式是否合法。"""
