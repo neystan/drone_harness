@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from drone_harness.bus import MessageBus
 from drone_harness.config.schema import RuntimeProfile
+from drone_harness.runtime.navigation import NavigationPlan
 from drone_harness.runtime.observation import ObservationSnapshot
 from drone_harness.runtime.task_state import TaskState
 from drone_harness.vision.depth_rules import DepthRules, compute_depth_rules, invalid_depth_rules
@@ -39,6 +40,8 @@ class ToolContext:
     message_bus: MessageBus | None = None
     observation: ObservationSnapshot | None = None
     depth_rules: DepthRules | None = None
+    navigation_enabled: bool = False
+    navigation_plan: NavigationPlan | None = None
 
 
 @dataclass(frozen=True)

@@ -7,9 +7,15 @@ import math
 import time
 from typing import Any
 
-from drone_harness.logging.task_log import log_agent_message, log_observation, log_task_state
+from drone_harness.bus.intervention import interrupt_if_requested
+from drone_harness.logging.task_log import (
+    log_agent_message, log_navigation_plan, log_observation, log_task_state, log_tool_call,
+)
+from drone_harness.runtime.navigation import (
+    compact_navigation_history, navigation_messages, parse_navigation_decision, request_navigation_plan,
+)
 from drone_harness.runtime.observation import ObservationSnapshot, build_observation_message
-from drone_harness.runtime.safety import EndCurrentTurn, request_confirmed_hover
+from drone_harness.runtime.safety import EndCurrentTurn, SafetyHandoffRequired, request_confirmed_hover
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.runtime.tool_dispatcher import dispatch_tool_call
 from drone_harness.tools.registry import ToolContext, get_tool_schemas
@@ -17,6 +23,7 @@ from drone_harness.vision.depth_rules import compute_depth_rules
 
 
 MAX_TOOL_CALLS_PER_TURN = 50
+MAX_NAVIGATION_REQUESTS = 200
 MAX_CONSECUTIVE_NO_PROGRESS = 3
 
 
@@ -26,15 +33,37 @@ def agent_loop(
     messages: list[dict[str, Any]],
     context: ToolContext,
 ) -> str:
-    """连续处理单工具调用，只有 observe 才向模型插入新图。"""
-    for _ in range(MAX_TOOL_CALLS_PER_TURN):
+    """固定拆分与推进导航，继续复用单工具循环和按需观察。"""
+    task_start = len(messages)
+    planning_requests = 0
+    if context.navigation_enabled and context.navigation_plan is None:
+        _record_task_state(context, "thinking")
+        try:
+            planning_requests = 1
+            context.navigation_plan = request_navigation_plan(client, model, messages)
+        except Exception as exc:
+            return _stop_with_message(context, f"导航拆分失败，未执行动作，已停止本轮：{type(exc).__name__}",
+                                      safety_stop=True)
+    plan = context.navigation_plan
+    if plan is not None:
+        print(f"plan> 已建立 {len(plan.subgoals)} 段导航计划，按顺序自动推进。")
+        for number, goal in enumerate(plan.subgoals, start=1):
+            print(f"plan> {number}. {goal.description}；完成条件：{goal.completion_condition}")
+        log_navigation_plan(context.profile, context.session_id, "created", plan)
+    request_limit = MAX_NAVIGATION_REQUESTS - planning_requests if plan is not None else MAX_TOOL_CALLS_PER_TURN
+    for _ in range(request_limit):
         if context.task_state is not None and context.task_state.consecutive_no_progress >= MAX_CONSECUTIVE_NO_PROGRESS:
             return _stop_with_message(context, "连续动作没有可测位移，已停止自主规划。", safety_stop=True)
+        if plan is not None:
+            interruption = interrupt_if_requested(context, hover_on_flight_tool=False)
+            if interruption is not None:
+                return _stop_with_message(context, interruption["message"], safety_stop=True)
         _record_task_state(context, "thinking")
         try:
             response = client.chat.completions.create(
                 model=model,
-                messages=messages,
+                messages=(navigation_messages(messages, plan, observation_current=_navigation_observation_current(context))
+                          if plan is not None else messages),
                 tools=get_tool_schemas(context.profile),
                 tool_choice="auto",
                 temperature=0.0,
@@ -52,31 +81,69 @@ def agent_loop(
         ):
             return _stop_with_message(context, "模型工具响应结构无效，已停止本轮。", safety_stop=True)
 
-        if not tool_calls:
-            _record_task_state(context, "idle")
-            assistant_text = message.content or ""
-            if not isinstance(assistant_text, str):
-                return _stop_with_message(context, "模型文本响应结构无效，已停止本轮。", safety_stop=True)
-            print(f"agent> {assistant_text}")
-            messages.append({"role": "assistant", "content": assistant_text})
-            log_agent_message(context.profile, context.session_id, "assistant", assistant_text)
-            if context.task_state is not None and "候选完成" in assistant_text:
-                context.task_state.completion_candidate = assistant_text
-            return assistant_text
-
         assistant_text = message.content or ""
         if not isinstance(assistant_text, str):
             return _stop_with_message(context, "模型文本响应结构无效，已停止本轮。", safety_stop=True)
-        messages.append(_assistant_tool_message(message, tool_calls))
-        if assistant_text:
-            print(f"agent> {assistant_text}")
-            log_agent_message(context.profile, context.session_id, "assistant", assistant_text)
-        if len(tool_calls) != 1:
+        decision = None
+        display_text = assistant_text
+        if plan is not None:
+            try:
+                decision = parse_navigation_decision(assistant_text)
+                display_text = decision.display_text
+            except ValueError:
+                if tool_calls:
+                    messages.append(_assistant_tool_message(message, tool_calls))
+                    _skip_navigation_calls(context, messages, tool_calls, {
+                        "success": False, "error": "INVALID_NAVIGATION_DECISION", "motion_executed": False,
+                    })
+                return _stop_with_message(context, "子目标判断结构无效，未执行动作，已停止本轮。", safety_stop=True)
+        messages.append(_assistant_tool_message(message, tool_calls) if tool_calls else
+                        {"role": "assistant", "content": assistant_text})
+        if display_text:
+            print(f"agent> {display_text}")
+            log_agent_message(context.profile, context.session_id, "assistant", display_text)
+        if len(tool_calls) > 1:
             refusal = {"success": False, "error": "MULTIPLE_TOOL_CALLS_REJECTED",
                        "message": "本轮模型提出多个动作，全部拒绝且未执行。"}
             for call in tool_calls:
                 messages.append(_build_tool_message(call.id, refusal))
             return _stop_with_message(context, refusal["message"], safety_stop=True)
+
+        if plan is not None and plan.current is not None and decision.subgoal_complete:
+            current_observation = context.observation if _navigation_observation_current(context) else None
+            advanced = plan.advance(decision.evidence, current_observation.observation_id if current_observation else None)
+            _skip_navigation_calls(context, messages, tool_calls, {
+                "success": True, "motion_executed": False, "error": "SKIPPED_ON_SUBGOAL_CONFIRMATION",
+                "advanced": advanced, "message": "完成判断中的工具未执行，请按最新计划继续。",
+            })
+            if advanced:
+                if tool_calls:
+                    plan.feedback = "上一条确认回复中同时提出的工具未执行，请按当前段重新规划。"
+                print(f"plan> 已确认 {plan.current_index}/{len(plan.subgoals)} 段：{decision.evidence}")
+                log_navigation_plan(context.profile, context.session_id, "advanced", plan)
+                compact_navigation_history(messages, task_start, observation_current=True)
+                if plan.status == "finishing" and context.task_state is not None:
+                    context.task_state.completion_candidate = plan.conversation_summary()
+                if plan.status == "finishing" and plan.finish_action == "hold":
+                    return _finish_navigation_hold(context)
+            continue
+
+        if not tool_calls:
+            if plan is not None:
+                plan.feedback = "任务尚未结束，请继续执行当前段。" if plan.current is not None else "所有导航段已确认，请调用 land 完成收尾。"
+                continue
+            _record_task_state(context, "idle")
+            if context.task_state is not None and "候选完成" in assistant_text:
+                context.task_state.completion_candidate = assistant_text
+            return assistant_text
+
+        if plan is not None and plan.status == "finishing" and tool_calls[0].function.name not in {"get_state", "land"}:
+            _skip_navigation_calls(context, messages, tool_calls, {
+                "success": True, "motion_executed": False, "error": "NAVIGATION_FINISHING",
+                "message": "导航段全部确认，只需查询状态或执行降落收尾。",
+            })
+            plan.feedback = "只允许查询状态和执行所要求的降落，不再执行导航动作。"
+            continue
 
         call = tool_calls[0]
         before_pose = _current_pose(context)
@@ -84,7 +151,12 @@ def agent_loop(
             tool_result = dispatch_tool_call(context, call)
         except EndCurrentTurn as exc:
             _append_turn_end_tool_results(messages, tool_calls, 0, exc)
-            return _stop_with_message(context, str(exc))
+            return _stop_with_message(context, str(exc), safety_stop=plan is not None)
+        except SafetyHandoffRequired:
+            if plan is not None:
+                plan.finish(completed=False, reason="飞行工具触发原 PX4 安全退出，导航未完成。")
+                log_navigation_plan(context.profile, context.session_id, "incomplete", plan)
+            raise
         view_changed = bool(tool_result.get("success")) and _motion_changed_view(call.function.name, tool_result)
         if view_changed:
             if context.profile.post_motion_wait_enabled:
@@ -98,6 +170,11 @@ def agent_loop(
         if not tool_result.get("success"):
             return _stop_with_message(context, f"{call.function.name} 未成功，已停止本轮。", safety_stop=True)
         if call.function.name == "land":
+            if plan is not None:
+                completed = plan.status == "finishing" and plan.finish_action == "land"
+                text = ("模型已确认全部子目标，降落完成，本轮已结束（未独立核验到达）。" if completed else
+                        "降落完成，但导航子目标尚未全部确认，本轮已结束。")
+                return _stop_with_message(context, text, navigation_complete=completed)
             return _stop_with_message(context, "降落完成，本轮已结束。")
         if call.function.name == "observe":
             snapshot = context.observation
@@ -125,7 +202,35 @@ def agent_loop(
                 context.task_state.clear_observation()
         _compact_history(messages)
 
-    return _stop_with_message(context, "本轮工具调用次数过多，已停止。", safety_stop=True)
+    text = "导航模型请求预算耗尽，任务未完成，已停止。" if plan is not None else "本轮工具调用次数过多，已停止。"
+    return _stop_with_message(context, text, safety_stop=True)
+
+
+def _navigation_observation_current(context: ToolContext) -> bool:
+    """只用当前 observe 配对缓存允许完成确认。"""
+    return (context.observation is not None and context.depth_rules is not None
+            and context.observation.observation_id == context.depth_rules.observation_id)
+
+
+def _skip_navigation_calls(
+    context: ToolContext, messages: list[dict[str, Any]], calls: list[Any], result: dict[str, Any],
+) -> None:
+    """记录未执行工具并补齐协议，压缩后仍可从日志核查。"""
+    for call in calls:
+        messages.append(_build_tool_message(call.id, result))
+        log_tool_call(context.profile, context.session_id, call.function.name,
+                      {"raw_arguments": call.function.arguments}, result)
+
+
+def _finish_navigation_hold(context: ToolContext) -> str:
+    """确认处于空中受控状态，再复用原悬停交接收尾。"""
+    controller = context.controller
+    flight_state = getattr(controller, "flight_state", None)
+    mode = getattr(getattr(controller, "vehicle_status", None), "mode", None)
+    if not callable(flight_state) or flight_state() != "IN_AIR" or mode not in {"OFFBOARD", "AUTO.LOITER"}:
+        return _stop_with_message(context, "全部子目标已确认，但无法确认空中悬停状态，任务未完成。", safety_stop=True)
+    return _stop_with_message(context, "模型已确认全部子目标，按要求保持空中，本轮已结束（未独立核验到达）。",
+                              safety_stop=True, navigation_complete=True)
 
 
 def append_observation(
@@ -216,14 +321,26 @@ def _motion_changed_view(tool_name: str, result: dict[str, Any]) -> bool:
     return tool_name in {"takeoff", "forward", "up", "down"}
 
 
-def _stop_with_message(context: ToolContext, assistant_text: str, *, safety_stop: bool = False) -> str:
+def _stop_with_message(
+    context: ToolContext, assistant_text: str, *, safety_stop: bool = False, navigation_complete: bool = False,
+) -> str:
     """异常停止时先确认悬停，再输出不含原图和密钥的原因。"""
-    if safety_stop:
-        controller = context.controller
-        flight_state = getattr(controller, "flight_state", None)
-        status = getattr(controller, "vehicle_status", None)
-        if flight_state is not None and flight_state() == "IN_AIR" and getattr(status, "mode", None) == "OFFBOARD":
-            request_confirmed_hover(controller, action_name="agent loop stop")
+    try:
+        if safety_stop:
+            controller = context.controller
+            flight_state = getattr(controller, "flight_state", None)
+            status = getattr(controller, "vehicle_status", None)
+            if flight_state is not None and flight_state() == "IN_AIR" and getattr(status, "mode", None) == "OFFBOARD":
+                request_confirmed_hover(controller, action_name="agent loop stop")
+    except SafetyHandoffRequired:
+        if context.navigation_plan is not None:
+            context.navigation_plan.finish(completed=False, reason="悬停未确认，已交给原 PX4 安全退出流程。")
+            log_navigation_plan(context.profile, context.session_id, "incomplete", context.navigation_plan)
+        raise
+    if context.navigation_plan is not None:
+        context.navigation_plan.finish(completed=navigation_complete, reason=assistant_text)
+        log_navigation_plan(context.profile, context.session_id, context.navigation_plan.status, context.navigation_plan)
+        _record_task_state(context, "idle")
     print(f"agent> {assistant_text}")
     log_agent_message(context.profile, context.session_id, "assistant", assistant_text)
     return assistant_text

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from drone_harness.config.schema import RuntimeProfile
+from drone_harness.runtime.navigation import NavigationPlan
 from drone_harness.runtime.task_state import TaskState
 
 BEIJING_TZ = timezone(timedelta(hours=8))
@@ -137,5 +138,17 @@ def log_observation(
     }
     try:
         append_jsonl(str(_session_log_dir(profile, session_id)), "observations.jsonl", event)
+    except OSError:
+        pass
+
+
+def log_navigation_plan(
+    profile: RuntimeProfile, session_id: str, event_type: str, plan: NavigationPlan,
+) -> None:
+    """记录计划建立、推进和停止，不包含图片或连接配置。"""
+    event = {"timestamp": _timestamp(), "profile_name": profile.name,
+             "event_type": event_type, "plan": plan.snapshot()}
+    try:
+        append_jsonl(str(_session_log_dir(profile, session_id)), "navigation_plan.jsonl", event)
     except OSError:
         pass

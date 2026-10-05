@@ -88,7 +88,7 @@ class NavigationPlan:
         """跨轮只保留人类可读进度，不携带工具或判断协议。"""
         completed = "；".join(f"{goal.description}（依据：{goal.evidence}）"
                               for goal in self.subgoals[:self.current_index]) or "无"
-        return f"导航进度：{self.current_index}/{len(self.subgoals)} 段已确认；已确认：{completed}。{self.stop_reason}"
+        return f"导航进度：{self.current_index}/{len(self.subgoals)} 段已确认；已确认：{completed}。"
 
 
 @dataclass(frozen=True)
