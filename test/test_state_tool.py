@@ -2,7 +2,6 @@
 
 import json
 import math
-import time
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -23,7 +22,6 @@ def controller_with_state():
     controller.vehicle_status_received = True
     controller.vehicle_status = SimpleNamespace(connected=True, armed=True, mode="AUTO.LOITER")
     controller.pose_received = True
-    controller.pose_received_monotonic_ns = time.monotonic_ns() - 2_000_000_000
     controller.vehicle_local_position = SimpleNamespace(x=12.4, y=-3.1, z=-5.0,
                                                         heading=math.pi / 2, xy_valid=True, z_valid=True)
     controller.extended_state_received = True
@@ -32,15 +30,15 @@ def controller_with_state():
     return controller
 
 
-def test_state_reports_local_position_height_heading_and_pose_age():
-    """正确报告北东下坐标与参考高度，不把旧缓存年龄隐藏掉。"""
+def test_state_reports_only_requested_fields():
+    """正确报告位置和参考高度，工具结果不含冗余字段。"""
     result = get_state(controller_with_state())
     assert result["position_ned_m"] == {"north": 12.4, "east": -3.1, "down": -5.0}
     assert result["height_above_reference_m"] == 5.0
-    assert result["heading_deg"] == 90.0
-    assert result["position_age_s"] >= 2.0
-    assert result["in_air"] is True and result["flight_state"] == "IN_AIR"
+    assert result["in_air"] is True
     assert result["mode"] == "AUTO.LOITER"
+    assert set(result) == {"success", "connected", "armed", "mode", "in_air",
+                           "position_ned_m", "height_above_reference_m"}
     json.dumps(result, allow_nan=False)
 
 
@@ -48,8 +46,8 @@ def test_missing_state_does_not_invent_ground_or_zero_position():
     """未接收任何消息仍正常反馈未知，不结束规划轮次。"""
     result = get_state(SimpleNamespace())
     assert result["success"]
-    assert result["flight_state"] == "UNKNOWN"
-    for key in ("in_air", "position_ned_m", "height_above_reference_m", "heading_deg", "armed", "connected"):
+    assert result["mode"] == "UNKNOWN"
+    for key in ("in_air", "position_ned_m", "height_above_reference_m", "armed", "connected"):
         assert result[key] is None
 
 
@@ -75,6 +73,16 @@ def test_disconnected_state_and_unknown_reference_are_not_current_facts():
     controller.vehicle_status.connected = False
     result = get_state(controller)
     assert result["in_air"] is None and result["position_ned_m"] is None
+
+
+def test_reference_height_uses_recorded_ground_not_coordinate_origin():
+    """非零地面参考也按地面 down 减当前 down 计算高度。"""
+    controller = controller_with_state()
+    controller.ground_z_ned = 2.0
+    controller.vehicle_local_position.z = -3.0
+    result = get_state(controller)
+    assert result["position_ned_m"]["down"] == -3.0
+    assert result["height_above_reference_m"] == 5.0
 
 
 @pytest.mark.parametrize("mode", ["simulation", "real"])

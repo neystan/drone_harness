@@ -1,5 +1,13 @@
 # `drone_harness` Phase 1：单目标飞行闭环详细实施文档
 
+## 2026-10-05：精简 get_state 返回值
+
+仅保留 success、connected、armed、mode、in_air、position_ned_m、height_above_reference_m。删除位置年龄、朝向、固定 message，以及与 in_air 重复的 flight_state 字符串；内部状态判断和位姿缓存继续复用原实现。
+
+参考高度来自控制器已有方法：记录的地面 NED down 减当前 down。地面参考在已确认落地、未解锁且位姿有效时缓存；例如参考 0、当前 -5，返回 5 米。参考缺失或位姿无效则高度未知，不新增地形或下视测距。工具描述保留坐标和高度含义，避免每次结果重复输出说明。
+
+全量离线测试 192 项通过，覆盖精简字段及非零地面参考的高度计算；编译和差异检查通过，未启动仿真。
+
 ## 2026-10-05：可开关、可修改秒数的动作后等待
 
 sim.yaml 和 real.yaml 顶层新增 post_motion_wait_enabled，默认 true；设为 false 后重启 harness 即关闭。post_motion_wait_s 默认 2.0，是可以直接修改的等待秒数。成功起飞、前进、升降或非零旋转后，runtime 在把结果交给下一次模型规划之前按该秒数 sleep，使随后 observe 的取帧发生在等待之后。仅暂停规划线程，原后台 ROS executor 持续工作。
