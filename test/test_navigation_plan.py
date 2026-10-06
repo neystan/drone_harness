@@ -1,130 +1,110 @@
-"""离线验证计划拆分、顺序推进和上下文结构。"""
+"""验证清单只做基本校验，允许模型自主改写。"""
 
-import json
-from types import SimpleNamespace
+from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
-from drone_harness.runtime.navigation import (
-    compact_navigation_history, navigation_conversation_text, navigation_messages,
-    parse_navigation_decision, parse_navigation_plan, request_navigation_plan,
-)
-from test_agent_observation_loop import FakeClient
+from drone_harness.runtime.navigation import is_pure_progress, parse_navigation_plan, update_navigation_plan
+from drone_harness.tools.schemas import get_tool_schemas
+from test_agent_observation_loop import context_for
 
 
-def plan_payload(*, finish_action="land"):
-    """构造两个有序导航段。"""
-    return {"navigation": True, "subgoals": [
-        {"description": "到路口", "completion_condition": "观察支持位于路口"},
-        {"description": "到红门前", "completion_condition": "观察支持位于红门前"},
-    ], "finish_action": finish_action}
+def plan_payload(*, finish_action="land", statuses=("in_progress", "pending")):
+    """生成完整清单参数，不依赖模型服务。"""
+    return {"subgoals": [
+        {"id": f"g{i + 1}", "description": title, "completion_condition": f"观察支持已{title}",
+         "status": status, "evidence": ""}
+        for i, (title, status) in enumerate(zip(("到路口", "到红门前"), statuses))],
+        "finish_action": finish_action, "reason": "按指令更新计划"}
 
 
-def make_plan(*, finish_action="land"):
-    """解析测试计划。"""
-    return parse_navigation_plan(json.dumps(plan_payload(finish_action=finish_action)), "沿路到路口，再到红门前")
+def test_explicit_status_and_pending_focus():
+    """非连续完成与全待执行均按提交状态保存。"""
+    plan = parse_navigation_plan(plan_payload(statuses=("pending", "completed")), "原文")
+    assert plan.completed_count == 1 and plan.current.id == "g1"
+    assert not plan.snapshot()["current_is_explicit"]
+    assert plan.snapshot()["subgoals"][0]["status"] == "pending"
+    assert "到红门前" in plan.conversation_summary()
 
 
-def test_plan_advances_only_in_order_and_finishes_after_all_subgoals():
-    """依据、观测和顺序均由程序保存。"""
-    plan = make_plan()
-    assert plan.current.description == "到路口"
-    assert not plan.advance("已到路口", None)
-    assert plan.current_index == 0
-    assert plan.advance("已到路口", "obs-1")
-    assert plan.current.description == "到红门前"
-    assert plan.subgoals[0].observation_id == "obs-1"
-    assert plan.advance("已到红门前", "obs-2")
-    assert plan.status == "finishing" and plan.current is None
-    assert not plan.advance("不能重复确认", "obs-2")
-    plan.finish(completed=True, reason="降落完成")
-    assert plan.status == "completed"
-    assert [item["status"] for item in plan.snapshot()["subgoals"]] == ["completed", "completed"]
+@pytest.mark.parametrize("change", [
+    lambda p: p.update(extra=True), lambda p: p.pop("reason"),
+    lambda p: p.update(reason=" "), lambda p: p.update(reason=1),
+    lambda p: p.update(finish_action=[]), lambda p: p.update(finish_action="fly"),
+    lambda p: p.update(subgoals=[]), lambda p: p.update(subgoals={}),
+    lambda p: p["subgoals"][0].update(id=" "),
+    lambda p: p["subgoals"][0].update(description=""),
+    lambda p: p["subgoals"][0].update(completion_condition=""),
+    lambda p: p["subgoals"][0].update(evidence=None),
+    lambda p: p["subgoals"][0].update(status="done"),
+    lambda p: p["subgoals"][0].update(extra="x"),
+    lambda p: p["subgoals"][1].update(id="g1"),
+    lambda p: p["subgoals"][1].update(status="in_progress"),
+])
+def test_invalid_candidate_is_atomic(tmp_path, change):
+    """非法清单返回可修正错误，原计划保持不变。"""
+    context = context_for(tmp_path)
+    context.navigation_enabled = True
+    context.navigation_instruction = "原文"
+    assert update_navigation_plan(context, plan_payload())["success"]
+    old = context.navigation_plan
+    before = deepcopy(old.snapshot())
+    bad = plan_payload()
+    change(bad)
+    result = update_navigation_plan(context, bad)
+    assert result["error"] == "INVALID_NAVIGATION_PLAN" and not result["plan_changed"]
+    assert context.navigation_plan is old and old.snapshot() == before
 
 
-def test_early_finish_does_not_mark_navigation_completed():
-    """提前结束保留未完成记录。"""
-    plan = make_plan()
+def test_free_rewrite_reopen_delete_and_repeat(tmp_path):
+    """允许批量完成、改写条件、调序删除和重开，重复提交不压缩。"""
+    context = context_for(tmp_path)
+    context.navigation_enabled = True
+    context.navigation_instruction = "原始要求"
+    payload = plan_payload(statuses=("completed", "completed"))
+    assert update_navigation_plan(context, payload)["status"] == "finishing"
+    assert context.observation is None
+    payload["subgoals"].reverse()
+    payload["subgoals"].pop()
+    payload["subgoals"][0].update(status="in_progress", completion_condition="更正条件")
+    payload["finish_action"] = "hold"
+    result = update_navigation_plan(context, payload)
+    assert result["success"] and result["status"] == "running" and not result["compact_history"]
+    assert context.navigation_plan.original_instruction == "原始要求"
+    repeated = update_navigation_plan(context, payload)
+    assert not repeated["changed"] and not repeated["compact_history"]
+
+
+def test_pure_progress_only():
+    """压缩只用于纯进度更新，不能把计划调整误判为完成段。"""
+    old = parse_navigation_plan(plan_payload(), "原文")
+    value = plan_payload(statuses=("completed", "in_progress"))
+    new = parse_navigation_plan(value, "原文")
+    assert is_pure_progress(old, new)
+    value["subgoals"][1]["description"] = "改变目标"
+    assert not is_pure_progress(old, parse_navigation_plan(value, "原文"))
+    assert not is_pure_progress(new, old)
+    assert not is_pure_progress(None, new)
+
+
+@pytest.mark.parametrize("enabled,mode,visible", [(True, "simulation", True),
+                                                   (False, "simulation", False), (True, "real", False)])
+def test_schema_and_handler_share_enable_boundary(tmp_path, enabled, mode, visible):
+    """实机和未启用阶段二时既不暴露也不执行新工具。"""
+    context = context_for(tmp_path)
+    context.navigation_enabled = enabled
+    context.profile = replace(context.profile, mode=mode)
+    schemas = get_tool_schemas(context.profile, navigation_enabled=enabled)
+    assert ("update_navigation_plan" in {s["function"]["name"] for s in schemas}) == visible
+    assert update_navigation_plan(context, plan_payload())["success"] == visible
+
+
+def test_finish_needs_both_complete_list_and_execution():
+    """收尾成功标志不能覆盖未完成清单，清单完成也不能覆盖收尾失败。"""
+    plan = parse_navigation_plan(plan_payload(), "原文")
     plan.finish(completed=True, reason="提前降落")
     assert plan.status == "incomplete"
-    assert plan.snapshot()["current_subgoal_number"] is None
-
-
-@pytest.mark.parametrize("bad", [
-    {}, {"navigation": "true"}, {"navigation": True, "subgoals": []},
-    {**plan_payload(), "finish_action": "fly"},
-    {**plan_payload(), "subgoals": [{}]},
-    {**plan_payload(), "subgoals": [{"description": " ", "completion_condition": "条件"}]},
-    {**plan_payload(), "subgoals": [{"description": "目标", "completion_condition": 1}]},
-    [],
-])
-def test_invalid_plan_is_rejected(bad):
-    """无效拆分不能进入执行。"""
-    with pytest.raises(ValueError):
-        parse_navigation_plan(json.dumps(bad), "导航任务")
-
-
-def test_plain_chat_has_no_plan_and_code_fence_is_accepted():
-    """普通交流和常见围栏响应有明确语义。"""
-    assert parse_navigation_plan('{"navigation":false}', "你好") is None
-    assert parse_navigation_plan("```json\n" + json.dumps(plan_payload()) + "\n```", "导航").current_index == 0
-
-
-@pytest.mark.parametrize("content", [
-    '{"subgoal_complete":"true","evidence":"已到达"}',
-    '{"subgoal_complete":true,"evidence":" "}',
-    '{"subgoal_complete":false,"evidence":null}',
-    '{"subgoal_complete":false,"evidence":"","scene_description":1}',
-    '{"subgoal_complete":true', '[]',
-])
-def test_invalid_completion_is_rejected(content):
-    """格式错误或缺少依据不能确认。"""
-    with pytest.raises(ValueError):
-        parse_navigation_decision(content)
-
-
-def test_empty_or_plain_text_does_not_confirm_completion():
-    """自然语言宣称到达也不是结构化完成事件。"""
-    assert not parse_navigation_decision("").subgoal_complete
-    assert not parse_navigation_decision("已经到达目标，可以结束了").subgoal_complete
-    content = '{"subgoal_complete":true,"evidence":"新观察支持到达","scene_description":"红门在正前方"}'
-    assert parse_navigation_decision(content).subgoal_complete
-    assert navigation_conversation_text(content) == "红门在正前方"
-
-
-def test_plan_request_uses_same_model_without_tools_or_images():
-    """拆分只读取文字会话，不自动取图或执行工具。"""
-    client = FakeClient([SimpleNamespace(content=json.dumps(plan_payload()), tool_calls=[])])
-    messages = [{"role": "system", "content": "原提示"}, {"role": "user", "content": "去红门前"}]
-    plan = request_navigation_plan(client, "same-vlm", messages)
-    assert plan.original_instruction == "去红门前"
-    assert len(client.requests) == 1 and all(isinstance(item["content"], str) for item in client.requests[0])
-
-
-def test_progress_injection_replaces_snapshot_without_mutating_history():
-    """最新摘要独立生成，内部观测号不上送模型。"""
-    messages = [{"role": "system", "content": "原提示"}, {"role": "user", "content": "任务"}]
-    plan = make_plan()
-    first = navigation_messages(messages, plan, observation_current=False)
-    plan.advance("位于路口", "internal-observation")
-    second = navigation_messages(messages, plan, observation_current=True)
-    assert messages[0]["content"] == "原提示"
-    assert '"current_subgoal_number": 1' in first[0]["content"]
-    assert '"current_subgoal_number": 2' in second[0]["content"]
-    assert "位于路口" in second[0]["content"] and "internal-observation" not in str(second)
-    assert second[0]["content"].count("当前导航计划：") == 1
-
-
-@pytest.mark.parametrize("current", [True, False])
-def test_completed_segment_compaction_preserves_prefix_and_no_orphan_tools(current):
-    """压缩按整段进行，仅保留当前有效的最新图。"""
-    prefix = [{"role": "system", "content": "原提示"}, {"role": "user", "content": "完整指令"}]
-    visual = {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "new-image"}}]}
-    messages = prefix + [
-        {"role": "assistant", "content": "旧描述", "tool_calls": [{"id": "a"}]},
-        {"role": "tool", "content": "动作反馈", "tool_call_id": "a"}, visual,
-    ]
-    old_request = list(messages)
-    compact_navigation_history(messages, 2, observation_current=current)
-    assert messages == prefix + ([visual] if current else [])
-    assert old_request[2]["tool_calls"][0]["id"] == "a"
+    plan = parse_navigation_plan(plan_payload(statuses=("completed", "completed")), "原文")
+    plan.finish(completed=False, reason="降落失败")
+    assert plan.status == "incomplete"

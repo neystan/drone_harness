@@ -31,6 +31,11 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
     print(f"tool> calling {tool_name} args={raw_arguments}")
 
     definition = get_tool_definition(tool_name)
+    if tool_name == "update_navigation_plan" and (
+            not context.navigation_enabled or context.profile.mode != "simulation"):
+        result = {"success": False, "error": "NAVIGATION_DISABLED", "plan_changed": False}
+        log_tool_call(context.profile, context.session_id, tool_name, {"raw_arguments": raw_arguments}, result)
+        return result
     if definition is None:
         result = {
             "success": False,
@@ -55,6 +60,8 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
             "error": "INVALID_TOOL_ARGUMENTS",
             "message": f"failed to parse tool arguments: {exc}",
         }
+        if tool_name == "update_navigation_plan":
+            result["plan_changed"] = False
         log_tool_call(
             context.profile,
             context.session_id,
@@ -71,6 +78,8 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
             "error": "INVALID_TOOL_ARGUMENTS",
             "message": "tool arguments must be a JSON object",
         }
+        if tool_name == "update_navigation_plan":
+            result["plan_changed"] = False
         log_tool_call(context.profile, context.session_id, tool_name, arguments, result)
         _update_task_state(context, "tool_finished", tool_name, result=result)
         return result

@@ -12,7 +12,6 @@ from drone_harness.config.loader import load_profile
 from drone_harness.logging.task_log import create_session_id, log_agent_message, log_task_state
 from drone_harness.llm.client import create_llm_client
 from drone_harness.llm.prompts import build_system_prompt
-from drone_harness.runtime.navigation import navigation_conversation_text
 from drone_harness.runtime.task_state import TaskState, format_task_state_line
 from drone_harness.runtime.safety import SafetyHandoffRequired
 from drone_harness.runtime.terminal import open_input_terminal
@@ -187,10 +186,6 @@ def _run_interactive_loop(
         for message in messages[turn_start:]:
             content = message.get("content")
             if message.get("role") == "assistant" and isinstance(content, str) and content:
-                if context.navigation_plan is not None:
-                    content = navigation_conversation_text(content)
-                if not content:
-                    continue
                 conversation.append({"role": "assistant", "content": content})
         if context.navigation_plan is not None:
             conversation.append({"role": "assistant", "content": context.navigation_plan.conversation_summary()})

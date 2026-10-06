@@ -8,13 +8,14 @@ from typing import Any, Callable
 
 from drone_harness.bus import MessageBus
 from drone_harness.config.schema import RuntimeProfile
-from drone_harness.runtime.navigation import NavigationPlan
+from drone_harness.runtime.navigation import NavigationPlan, update_navigation_plan
 from drone_harness.runtime.observation import ObservationSnapshot
 from drone_harness.runtime.task_state import TaskState
 from drone_harness.vision.depth_rules import DepthRules, compute_depth_rules, invalid_depth_rules
 from . import flight
 from .state import get_state
 from .schemas import (
+    NAVIGATION_PLAN_TOOL_SCHEMA,
     DOWN_TOOL_SCHEMA,
     FORWARD_TOOL_SCHEMA,
     GET_STATE_TOOL_SCHEMA,
@@ -42,6 +43,7 @@ class ToolContext:
     depth_rules: DepthRules | None = None
     navigation_enabled: bool = False
     navigation_plan: NavigationPlan | None = None
+    navigation_instruction: str = ""
 
 
 @dataclass(frozen=True)
@@ -150,6 +152,8 @@ TOOL_DEFINITIONS = [
     ToolDefinition("land", LAND_TOOL_SCHEMA, _land_handler),
 ]
 TOOL_DEFINITION_BY_NAME = {definition.name: definition for definition in TOOL_DEFINITIONS}
+TOOL_DEFINITION_BY_NAME["update_navigation_plan"] = ToolDefinition(
+    "update_navigation_plan", NAVIGATION_PLAN_TOOL_SCHEMA, update_navigation_plan)
 
 
 def get_tool_definitions() -> list[ToolDefinition]:

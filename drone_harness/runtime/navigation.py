@@ -1,206 +1,179 @@
-"""保存有序导航计划及同一模型的完成判断。"""
+"""保存 VLM 自主管理的导航清单，不代替实际到达核验。"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
-from drone_harness.llm.prompts import NAVIGATION_EXECUTION_PROMPT, NAVIGATION_PLANNING_PROMPT
+from drone_harness.llm.prompts import NAVIGATION_EXECUTION_PROMPT
 
 
 @dataclass
 class NavigationSubgoal:
-    """保存一个导航段及其已确认依据。"""
+    """保存模型提交的目标、状态与依据。"""
 
+    id: str
     description: str
     completion_condition: str
-    evidence: str = ""
-    observation_id: str | None = None
+    status: str
+    evidence: str
 
 
 @dataclass
 class NavigationPlan:
-    """按顺序推进当前任务，不重写计划或恢复历史任务。"""
+    """保存本轮完整清单，允许模型调整或重新打开目标。"""
 
     original_instruction: str
     subgoals: list[NavigationSubgoal]
     finish_action: str
-    current_index: int = 0
+    reason: str
     status: str = "running"
     stop_reason: str = ""
     feedback: str = ""
 
     @property
-    def current(self) -> NavigationSubgoal | None:
-        """返回唯一活动段，收尾时返回空。"""
-        if self.status != "running" or self.current_index >= len(self.subgoals):
-            return None
-        return self.subgoals[self.current_index]
+    def completed_count(self) -> int:
+        """按条目实际状态计数，不假定完成项连续。"""
+        return sum(goal.status == "completed" for goal in self.subgoals)
 
-    def advance(self, evidence: str, observation_id: str | None) -> bool:
-        """有依据和当前观察时，完成当前段并激活下一段。"""
-        current = self.current
-        if current is None or not evidence.strip() or not observation_id:
-            self.feedback = "当前段尚不能确认，请先 observe 获取当前观察并给出完成依据。"
-            return False
-        current.evidence = evidence.strip()
-        current.observation_id = observation_id
-        self.current_index += 1
-        self.feedback = ""
-        if self.current_index == len(self.subgoals):
-            self.status = "finishing"
-        return True
+    @property
+    def current(self) -> NavigationSubgoal | None:
+        """优先返回当前项，否则返回待选焦点，不修改提交状态。"""
+        if self.status != "running":
+            return None
+        return next((goal for goal in self.subgoals if goal.status == "in_progress"),
+                    next((goal for goal in self.subgoals if goal.status == "pending"), None))
 
     def finish(self, *, completed: bool, reason: str) -> None:
-        """只有全部导航段已确认并完成收尾，才记录整体完成。"""
-        self.status = "completed" if completed and self.current_index == len(self.subgoals) else "incomplete"
+        """全部模型标记完成且收尾成功，才记录整体完成。"""
+        self.status = "completed" if completed and self.completed_count == len(self.subgoals) else "incomplete"
         self.stop_reason = reason
 
-    def snapshot(self, *, include_observation_ids: bool = True) -> dict[str, Any]:
-        """生成日志或模型摘要，不向模型泄露内部观测号。"""
-        subgoals = []
-        for index, goal in enumerate(self.subgoals):
-            item = {
-                "number": index + 1,
-                "description": goal.description,
-                "completion_condition": goal.completion_condition,
-                "status": ("completed" if index < self.current_index else
-                           "in_progress" if index == self.current_index and self.status == "running" else "pending"),
-                "evidence": goal.evidence,
-            }
-            if include_observation_ids:
-                item["observation_id"] = goal.observation_id
-            subgoals.append(item)
+    def snapshot(self) -> dict[str, Any]:
+        """生成日志和模型共用快照，不包含内部观测元数据。"""
+        current = self.current
         return {
             "original_instruction": self.original_instruction,
-            "status": self.status,
-            "completed_count": self.current_index,
-            "total_count": len(self.subgoals),
-            "current_subgoal_number": self.current_index + 1 if self.current is not None else None,
+            "subgoals": [asdict(goal) for goal in self.subgoals],
             "finish_action": self.finish_action,
-            "subgoals": subgoals,
+            "reason": self.reason,
+            "status": self.status,
+            "completed_count": self.completed_count,
+            "total_count": len(self.subgoals),
+            "current_subgoal_id": current.id if current else None,
+            "current_is_explicit": current is not None and current.status == "in_progress",
             "stop_reason": self.stop_reason,
             "feedback": self.feedback,
         }
 
     def conversation_summary(self) -> str:
-        """跨轮只保留人类可读进度，不携带工具或判断协议。"""
-        completed = "；".join(f"{goal.description}（依据：{goal.evidence}）"
-                              for goal in self.subgoals[:self.current_index]) or "无"
-        return f"导航进度：{self.current_index}/{len(self.subgoals)} 段已确认；已确认：{completed}。"
+        """跨轮保留模型进度文字，不恢复工具状态。"""
+        completed = "；".join(f"{goal.description}（依据：{goal.evidence or '未提供'}）"
+                             for goal in self.subgoals if goal.status == "completed") or "无"
+        return f"导航进度：{self.completed_count}/{len(self.subgoals)} 段由模型确认；已确认：{completed}。"
 
 
-@dataclass(frozen=True)
-class NavigationDecision:
-    """一次模型回复的完成判断，不代表独立核验。"""
-
-    subgoal_complete: bool = False
-    evidence: str = ""
-    scene_description: str = ""
-
-    @property
-    def display_text(self) -> str:
-        """将协议转为终端可读的描述与判断依据。"""
-        parts = [self.scene_description] if self.scene_description else []
-        if self.subgoal_complete:
-            parts.append(f"模型完成判断依据：{self.evidence}")
-        return "\n".join(parts)
-
-
-def _json_object(content: str) -> dict[str, Any]:
-    """解析模型 JSON，可接受外层代码围栏。"""
-    text = content.strip()
-    if text.startswith("```") and text.endswith("```"):
-        text = text.split("\n", 1)[-1].rsplit("\n", 1)[0]
-    try:
-        value = json.loads(text)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError("模型导航 JSON 无效") from exc
-    if not isinstance(value, dict):
-        raise ValueError("模型导航结果必须是对象")
-    return value
-
-
-def parse_navigation_plan(content: str, original_instruction: str) -> NavigationPlan | None:
-    """校验一次初始拆分；普通交流不建立计划。"""
-    value = _json_object(content)
-    if type(value.get("navigation")) is not bool:
-        raise ValueError("navigation 必须是布尔值")
-    if not value["navigation"]:
-        return None
-    goals = value.get("subgoals")
+def parse_navigation_plan(value: Any, original_instruction: str) -> NavigationPlan:
+    """只校验完整清单的结构，不冻结目标或检查语义完成。"""
+    if not isinstance(value, dict) or set(value) != {"subgoals", "finish_action", "reason"}:
+        raise ValueError("参数必须且只能包含 subgoals、finish_action、reason")
+    if not isinstance(value["finish_action"], str) or value["finish_action"] not in {"land", "hold"}:
+        raise ValueError("finish_action 必须为 land 或 hold")
+    if not isinstance(value["reason"], str) or not value["reason"].strip():
+        raise ValueError("reason 必须为非空文字")
+    goals = value["subgoals"]
     if not isinstance(goals, list) or not goals:
-        raise ValueError("导航计划须包含非空子目标列表")
-    if value.get("finish_action") not in ("land", "hold"):
-        raise ValueError("收尾动作必须为 land 或 hold")
-    subgoals = []
+        raise ValueError("subgoals 必须为非空列表")
+    fields = {"id", "description", "completion_condition", "status", "evidence"}
+    parsed = []
     for goal in goals:
-        if not isinstance(goal, dict) or any(
-            not isinstance(goal.get(key), str) or not goal[key].strip()
-            for key in ("description", "completion_condition")
-        ):
-            raise ValueError("子目标描述和完成条件须为非空文字")
-        subgoals.append(NavigationSubgoal(goal["description"].strip(), goal["completion_condition"].strip()))
-    return NavigationPlan(original_instruction, subgoals, value["finish_action"])
+        if not isinstance(goal, dict) or set(goal) != fields:
+            raise ValueError("子目标字段必须为 id、description、completion_condition、status、evidence")
+        if any(not isinstance(goal[key], str) for key in fields):
+            raise ValueError("子目标字段必须为文字")
+        if any(not goal[key].strip() for key in ("id", "description", "completion_condition")):
+            raise ValueError("id、description、completion_condition 不能为空")
+        if goal["status"] not in {"pending", "in_progress", "completed"}:
+            raise ValueError("子目标 status 无效")
+        parsed.append(NavigationSubgoal(**{key: goal[key].strip() for key in fields}))
+    if len({goal.id for goal in parsed}) != len(parsed):
+        raise ValueError("子目标 id 不能重复")
+    if sum(goal.status == "in_progress" for goal in parsed) > 1:
+        raise ValueError("最多一个 in_progress 子目标")
+    plan = NavigationPlan(original_instruction, parsed, value["finish_action"], value["reason"].strip())
+    if plan.completed_count == len(parsed):
+        plan.status = "finishing"
+    return plan
 
 
-def request_navigation_plan(client: Any, model: str, messages: list[dict[str, Any]]) -> NavigationPlan | None:
-    """程序固定请求同一模型拆分，不提供飞行工具或图片。"""
-    dialogue = [{"role": message["role"], "content": message["content"]}
-                for message in messages if message.get("role") in {"user", "assistant"}
-                and isinstance(message.get("content"), str)]
-    instruction = next(message["content"] for message in reversed(dialogue) if message["role"] == "user")
-    response = client.chat.completions.create(
-        model=model, messages=[{"role": "system", "content": NAVIGATION_PLANNING_PROMPT}, *dialogue],
-        temperature=0.0,
-    )
-    message = response.choices[0].message
-    if getattr(message, "tool_calls", None) or not isinstance(message.content, str):
-        raise ValueError("初始拆分不能提出工具调用，且须返回文字结构")
-    return parse_navigation_plan(message.content, instruction)
+def is_pure_progress(old: NavigationPlan | None, new: NavigationPlan) -> bool:
+    """只有目标不变且纯推进时才允许压缩，不限制计划改写。"""
+    if old is None or old.finish_action != new.finish_action or len(old.subgoals) != len(new.subgoals):
+        return False
+    progressed = False
+    for before, after in zip(old.subgoals, new.subgoals):
+        if (before.id, before.description, before.completion_condition) != (
+                after.id, after.description, after.completion_condition):
+            return False
+        if before.status == "completed":
+            if before != after:
+                return False
+        elif after.status == "completed":
+            progressed = True
+        elif before.evidence != after.evidence or (before.status, after.status) not in {
+                ("pending", "pending"), ("pending", "in_progress"), ("in_progress", "in_progress")}:
+            return False
+    return progressed
 
 
-def parse_navigation_decision(content: str) -> NavigationDecision:
-    """普通文字或空工具回复不确认完成，显式结构须合法。"""
-    text = content.strip()
-    if not text.startswith(("{", "[", "```")):
-        return NavigationDecision(scene_description=text)
-    value = _json_object(text)
-    complete = value.get("subgoal_complete")
-    evidence = value.get("evidence")
-    scene = value.get("scene_description", "")
-    if type(complete) is not bool or not isinstance(evidence, str) or not isinstance(scene, str):
-        raise ValueError("完成判断字段类型无效")
-    if complete and not evidence.strip():
-        raise ValueError("确认完成须提供依据")
-    return NavigationDecision(complete, evidence.strip(), scene.strip())
+def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    """原子替换清单，拒绝候选不会破坏已接受的状态。"""
+    if not context.navigation_enabled or context.profile.mode != "simulation":
+        return {"success": False, "error": "NAVIGATION_DISABLED", "plan_changed": False}
+    old = context.navigation_plan
+    try:
+        plan = parse_navigation_plan(arguments, old.original_instruction if old else context.navigation_instruction)
+    except ValueError as exc:
+        return {"success": False, "error": "INVALID_NAVIGATION_PLAN", "message": str(exc), "plan_changed": False}
+    changed = old is None or (old.subgoals, old.finish_action, old.reason) != (
+        plan.subgoals, plan.finish_action, plan.reason)
+    compact = changed and is_pure_progress(old, plan)
+    if changed:
+        context.navigation_plan = plan
+        from drone_harness.logging.task_log import log_navigation_plan
+
+        log_navigation_plan(context.profile, context.session_id, "created" if old is None else "updated", plan)
+        print(f"plan> {plan.completed_count}/{len(plan.subgoals)} 段由模型确认；{plan.reason}")
+        for goal in plan.subgoals:
+            print(f"plan> [{goal.status}] {goal.id} {goal.description}；完成条件：{goal.completion_condition}"
+                  + (f"；依据：{goal.evidence}" if goal.evidence else ""))
+    else:
+        plan = old
+    return {"success": True, "changed": changed, "compact_history": compact,
+            "completed_count": plan.completed_count, "total_count": len(plan.subgoals),
+            "current_subgoal_id": plan.current.id if plan.current else None, "status": plan.status,
+            "message": "清单已接受；完成状态为模型判断，未独立核验到达。"}
 
 
-def navigation_messages(
-    messages: list[dict[str, Any]], plan: NavigationPlan, *, observation_current: bool,
-) -> list[dict[str, Any]]:
-    """临时注入当前计划摘要，不反复追加或修改原消息。"""
-    snapshot = plan.snapshot(include_observation_ids=False)
-    snapshot["observation_current"] = observation_current
-    content = messages[0]["content"] + "\n" + NAVIGATION_EXECUTION_PROMPT + "\n当前导航计划：\n"
-    content += json.dumps(snapshot, ensure_ascii=False)
-    return [{**messages[0], "content": content}, *messages[1:]]
+def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | None,
+                        *, observation_current: bool) -> list[dict[str, Any]]:
+    """每轮注入最新清单，不累积旧快照。"""
+    content = NAVIGATION_EXECUTION_PROMPT
+    if plan is not None:
+        snapshot = plan.snapshot()
+        snapshot["observation_current"] = observation_current
+        content += "\n当前导航计划：\n" + json.dumps(snapshot, ensure_ascii=False)
+    if messages and messages[0]["role"] == "system":
+        return [{**messages[0], "content": messages[0]["content"] + "\n" + content}, *messages[1:]]
+    return [{"role": "system", "content": content}, *messages]
 
 
-def compact_navigation_history(
-    messages: list[dict[str, Any]], task_start: int, *, observation_current: bool,
-) -> None:
-    """整段压缩已完成的执行消息，保留最新可用观测且不留下孤立工具结果。"""
+def compact_navigation_history(messages: list[dict[str, Any]], task_start: int,
+                               *, observation_current: bool) -> None:
+    """压缩已完成段，保留最新观察和本次计划调用的完整协议对。"""
     latest = next((message for message in reversed(messages[task_start:])
                    if isinstance(message.get("content"), list)
                    and any(part.get("type") == "image_url" for part in message["content"])), None)
-    messages[task_start:] = [latest] if observation_current and latest is not None else []
-
-
-def navigation_conversation_text(content: str) -> str:
-    """下一轮只继承场景文字，完成依据由计划摘要统一保存。"""
-    try:
-        return parse_navigation_decision(content).scene_description
-    except ValueError:
-        return ""
+    pair = messages[-2:]
+    messages[task_start:] = ([latest] if observation_current and latest is not None else []) + pair

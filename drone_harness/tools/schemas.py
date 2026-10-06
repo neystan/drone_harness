@@ -147,9 +147,41 @@ TOOL_SCHEMAS = [
 ]
 
 
-def get_tool_schemas(profile: RuntimeProfile | None = None) -> list[dict]:
+NAVIGATION_PLAN_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "update_navigation_plan",
+        "description": "创建或替换本轮完整导航清单；包含所有仍需保留的条目，同一目标沿用 ID。"
+                       "通常只将当前项设为 in_progress，仅在计划或进度变化时调用。"
+                       "finish_action 默认 land，用户要求保持空中时使用 hold。",
+        "parameters": {
+            "type": "object", "additionalProperties": False,
+            "required": ["subgoals", "finish_action", "reason"],
+            "properties": {
+                "subgoals": {"type": "array", "minItems": 1, "items": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["id", "description", "completion_condition", "status", "evidence"],
+                    "properties": {
+                        "id": {"type": "string", "minLength": 1},
+                        "description": {"type": "string", "minLength": 1},
+                        "completion_condition": {"type": "string", "minLength": 1},
+                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                        "evidence": {"type": "string", "description": "简短完成依据；未完成时通常为空。"},
+                    },
+                }},
+                "finish_action": {"type": "string", "enum": ["land", "hold"]},
+                "reason": {"type": "string", "minLength": 1},
+            },
+        },
+    },
+}
+
+
+def get_tool_schemas(profile: RuntimeProfile | None = None, *, navigation_enabled: bool = False) -> list[dict]:
     """复制工具描述，并将当前配置的限额写入参数说明。"""
     schemas = deepcopy(TOOL_SCHEMAS)
+    if navigation_enabled and profile is not None and profile.mode == "simulation":
+        schemas.append(deepcopy(NAVIGATION_PLAN_TOOL_SCHEMA))
     if profile is None:
         return schemas
     functions = {item["function"]["name"]: item["function"] for item in schemas}
