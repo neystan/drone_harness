@@ -67,3 +67,5 @@ def test_client_uses_only_one_model_base_url_without_retry(monkeypatch) -> None:
     assert len(captured) == 1
     assert captured[0]["base_url"] == "https://open.bigmodel.cn/api/paas/v4"
     assert captured[0]["max_retries"] == 0
+    assert captured[0]["http_client"].trust_env is False
+    captured[0]["http_client"].close()

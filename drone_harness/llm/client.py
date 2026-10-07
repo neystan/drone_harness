@@ -31,15 +31,15 @@ def normalize_proxy_environment(
 
 
 def create_llm_client(profile: RuntimeProfile) -> Any:
-    """根据单一模型配置创建支持图片与工具调用的客户端。"""
-    normalize_proxy_environment()
-    from openai import OpenAI
+    """模型请求固定直连，不继承或修改进程的环境代理。"""
+    from openai import DefaultHttpxClient, OpenAI
 
     return OpenAI(
         api_key=profile.llm.api_key,
         base_url=normalize_chat_base_url(profile.llm.base_url),
         timeout=600.0,
         max_retries=0,
+        http_client=DefaultHttpxClient(trust_env=False, timeout=600.0),
     )
 
 

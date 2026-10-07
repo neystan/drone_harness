@@ -17,6 +17,8 @@ Phase 1 只使用 `settings.json` 的 `llm` 配置作为唯一图片 VLM。可�
 
 ## 离线检查
 
+2026-10-07：模型 HTTP 客户端固定使用 `trust_env=False`，不继承大小写 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`，也不改写系统/进程代理环境。仿真和实机共用此直连策略；600 秒请求超时、不自动重试保持不变。修改后须重启 harness；此设置不能绕过操作系统级 VPN/TUN 或透明代理。使用该选项也不继承 HTTP 客户端的环境证书设置，TLS 校验仍然开启。
+
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q
 ```
