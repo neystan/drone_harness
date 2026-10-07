@@ -97,7 +97,7 @@ def _start_live_runtime(profile) -> None:
             session_id=session_id,
             task_state=task_state,
             message_bus=message_bus,
-            navigation_enabled=profile.mode == "simulation",
+            navigation_enabled=True,
         )
         executor_thread.start()
         input_terminal_started = _start_input_terminal(input_server, profile.name)

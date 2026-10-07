@@ -89,9 +89,10 @@ def test_pure_progress_only():
 
 
 @pytest.mark.parametrize("enabled,mode,visible", [(True, "simulation", True),
-                                                   (False, "simulation", False), (True, "real", False)])
+                                                   (False, "simulation", False), (True, "real", True),
+                                                   (False, "real", False)])
 def test_schema_and_handler_share_enable_boundary(tmp_path, enabled, mode, visible):
-    """实机和未启用阶段二时既不暴露也不执行新工具。"""
+    """两种模式统一由阶段二开关控制计划工具。"""
     context = context_for(tmp_path)
     context.navigation_enabled = enabled
     context.profile = replace(context.profile, mode=mode)

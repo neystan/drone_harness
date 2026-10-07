@@ -249,7 +249,7 @@ def test_dynamic_budget_counts_requests_before_creation(tmp_path, monkeypatch):
     assert len(client.requests) == 4
 
 
-@pytest.mark.parametrize("enabled,mode", [(False, "simulation"), (True, "real")])
+@pytest.mark.parametrize("enabled,mode", [(False, "simulation"), (False, "real")])
 def test_disabled_tool_cannot_be_dispatched(tmp_path, enabled, mode):
     """隐藏 schema 之外还要在分发端拒绝越界调用。"""
     context = nav_context(tmp_path)
@@ -345,8 +345,8 @@ def test_pending_intervention_stops_before_request(tmp_path, monkeypatch):
     hover.assert_called_once()
 
 
-@pytest.mark.parametrize("mode,enabled", [("simulation", True), ("real", False)])
-def test_runtime_wires_phase2_only_for_simulation(tmp_path, monkeypatch, mode, enabled):
+@pytest.mark.parametrize("mode,enabled", [("simulation", True), ("real", True)])
+def test_runtime_wires_phase2_for_both_profiles(tmp_path, monkeypatch, mode, enabled):
     """全假运行资产验证入口开关，不启动真实 ROS 或仿真。"""
     import sys
     import drone_harness.runtime.runtime as runtime_module
@@ -398,3 +398,51 @@ def test_existing_no_progress_stop_not_bypassed_by_plan_update(tmp_path):
     client = RecordingClient([planning_reply()])
     assert "没有可测位移" in loop_module.agent_loop(client, "vlm", messages(), context)
     assert not client.requests
+
+
+@pytest.mark.parametrize("approve", [True, False])
+def test_real_plan_loop_keeps_landing_approval(tmp_path, monkeypatch, approve):
+    """实机清单自动更新，但实际降落仍须逐次人工确认。"""
+    from test_real_hitl import real_context
+    from drone_harness.llm.prompts import build_system_prompt
+
+    context = real_context(tmp_path)
+    context.navigation_enabled = True
+    context.controller.vehicle_status.mode = "AUTO.LOITER"
+    answers = Mock(return_value=SimpleNamespace(content="y" if approve else "n"))
+    context.message_bus = SimpleNamespace(get_next_user_message=answers,
+                                          has_pending_user_message=lambda: False)
+    landed = Mock(return_value={"success": True})
+    monkeypatch.setattr(flight, "land", landed)
+    history = messages()
+    history[0]["content"] = build_system_prompt(context.profile)
+    client = RecordingClient([planning_reply(), planning_reply(("completed", "completed")), reply("land")])
+    loop_module.agent_loop(client, "vlm", history, context)
+    assert (context.navigation_plan.status == "completed") == approve
+    assert landed.call_count == int(approve)
+    answers.assert_called_once()
+    for option in client.options:
+        assert len(option["tools"]) == 9
+    assert "update_navigation_plan" in client.requests[0][0]["content"]
+    assert "实机六种飞行动作每次均须人工确认" in client.requests[0][0]["content"]
+    assert '"completed_count": 2' in client.requests[-1][0]["content"]
+    assert_tool_pairs(history)
+
+
+def test_real_plan_rewrite_and_correction_need_no_approval(tmp_path, monkeypatch):
+    """实机沿用相同清单改写和纠错机制，不把计划操作当飞行动作。"""
+    import drone_harness.runtime.tool_dispatcher as dispatcher
+
+    context = nav_context(tmp_path)
+    context.profile = replace(context.profile, mode="real")
+    confirm = Mock(side_effect=AssertionError("清单操作不应审批"))
+    monkeypatch.setattr(dispatcher, "_confirm_flight_tool", confirm)
+    monkeypatch.setattr(loop_module, "MAX_NAVIGATION_REQUESTS", 4)
+    changed = plan_payload(statuses=("pending", "in_progress"))
+    changed["subgoals"].reverse()
+    client = RecordingClient([planning_reply(), reply("update_navigation_plan", {"invalid": True}),
+                              reply("update_navigation_plan", changed), reply(text="继续")])
+    assert "预算耗尽" in loop_module.agent_loop(client, "vlm", messages(), context)
+    assert context.navigation_plan.subgoals[0].id == "g2"
+    assert "INVALID_NAVIGATION_PLAN" in str(client.requests[2])
+    confirm.assert_not_called()

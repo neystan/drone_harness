@@ -180,7 +180,7 @@ NAVIGATION_PLAN_TOOL_SCHEMA = {
 def get_tool_schemas(profile: RuntimeProfile | None = None, *, navigation_enabled: bool = False) -> list[dict]:
     """复制工具描述，并将当前配置的限额写入参数说明。"""
     schemas = deepcopy(TOOL_SCHEMAS)
-    if navigation_enabled and profile is not None and profile.mode == "simulation":
+    if navigation_enabled:
         schemas.append(deepcopy(NAVIGATION_PLAN_TOOL_SCHEMA))
     if profile is None:
         return schemas

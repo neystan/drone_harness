@@ -37,7 +37,7 @@ def agent_loop(
     task_start = len(messages)
     context.navigation_instruction = next((item["content"] for item in reversed(messages)
                                            if item["role"] == "user" and isinstance(item["content"], str)), "")
-    navigation_enabled = context.navigation_enabled and context.profile.mode == "simulation"
+    navigation_enabled = context.navigation_enabled
     requests = 0
     while True:
         plan = context.navigation_plan

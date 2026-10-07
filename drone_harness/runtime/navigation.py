@@ -129,7 +129,7 @@ def is_pure_progress(old: NavigationPlan | None, new: NavigationPlan) -> bool:
 
 def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     """原子替换清单，拒绝候选不会破坏已接受的状态。"""
-    if not context.navigation_enabled or context.profile.mode != "simulation":
+    if not context.navigation_enabled:
         return {"success": False, "error": "NAVIGATION_DISABLED", "plan_changed": False}
     old = context.navigation_plan
     try:
