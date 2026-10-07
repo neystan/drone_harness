@@ -130,6 +130,7 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
             photo_save_dir=str(storage["photo_save_dir"]),
             analysis_save_dir=str(storage["analysis_save_dir"]),
             log_dir=str(storage["log_dir"]),
+            save_observation_images=storage.get("save_observation_images", False),
         ),
         observation=ObservationConfig(
             max_frame_age_s=float(observation["max_frame_age_s"]),

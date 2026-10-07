@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -123,6 +126,7 @@ def log_observation(
     depth_valid: bool,
     forward_max_m: float,
     reason: str,
+    image_path: str | None = None,
 ) -> None:
     """只记录观测元数据，不把原始图片或 base64 写入日志。"""
     event = {
@@ -135,11 +139,40 @@ def log_observation(
         "depth_valid": depth_valid,
         "forward_max_m": forward_max_m,
         "reason": reason,
+        "image_path": image_path,
     }
     try:
         append_jsonl(str(_session_log_dir(profile, session_id)), "observations.jsonl", event)
     except OSError:
         pass
+
+
+def save_observation_image(profile: RuntimeProfile, session_id: str,
+                           observation_id: str, message: dict[str, Any]) -> str | None:
+    """可选归档模型消息中的原 JPEG 字节，失败不影响执行。"""
+    if not profile.storage.save_observation_images:
+        return None
+    try:
+        url = next(part["image_url"]["url"] for part in message["content"]
+                   if part.get("type") == "image_url")
+        if not url.startswith("data:image/jpeg;base64,"):
+            raise ValueError("unsupported observation image")
+        payload = base64.b64decode(url.split(",", 1)[1], validate=True)
+        # 使用内容摘要命名，不把外部观测编号当作路径。
+        digest = hashlib.sha256(observation_id.encode() + payload).hexdigest()
+        relative = Path("observations") / f"{digest}.jpg"
+        path = _session_log_dir(profile, session_id) / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("xb") as handle:
+            handle.write(payload)
+        return str(relative)
+    except FileExistsError:
+        return str(relative)
+    except (OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
+        warning = f"观察图片保存失败：{type(exc).__name__}；不影响工具执行。"
+        print(f"log> {warning}", file=sys.stderr)
+        log_agent_message(profile, session_id, "system", warning)
+        return None
 
 
 def log_navigation_plan(

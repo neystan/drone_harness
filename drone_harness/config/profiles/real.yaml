@@ -10,6 +10,7 @@ ros:
   camera_depth_info_topic: null
 
 storage:
+  save_observation_images: false
   photo_save_dir: /home/hw/picture_real
   analysis_save_dir: /home/hw/picture_real/analysis_frames
   log_dir: /home/hw/drone_harness_logs/real

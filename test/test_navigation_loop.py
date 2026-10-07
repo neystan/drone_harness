@@ -267,7 +267,9 @@ def test_multiple_tools_execute_neither(tmp_path, monkeypatch):
     response = planning_reply()
     response.tool_calls.append(tool_call("takeoff", {"height": 2}, "other"))
     history = messages()
-    loop_module.agent_loop(RecordingClient([response]), "vlm", history, context)
+    client = RecordingClient([response, reply(text="重新选择单个工具")])
+    loop_module.agent_loop(client, "vlm", history, context)
+    assert len(client.requests) == 2
     dispatch.assert_not_called()
     assert_tool_pairs(history)
 

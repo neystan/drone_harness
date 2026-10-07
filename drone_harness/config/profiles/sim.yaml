@@ -12,6 +12,7 @@ ros:
   mavros_fcu_url: udp://:14540@127.0.0.1:14580
 
 storage:
+  save_observation_images: false
   photo_save_dir: /home/stan/AirVLN/drone_harness_runtime/picture
   analysis_save_dir: /home/stan/AirVLN/drone_harness_runtime/picture/analysis_frames
   log_dir: /home/stan/AirVLN/drone_harness_runtime/logs/sim

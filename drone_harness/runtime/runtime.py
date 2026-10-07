@@ -9,10 +9,11 @@ from typing import Any
 
 from drone_harness.bus import InputServer, MessageBus
 from drone_harness.config.loader import load_profile
-from drone_harness.logging.task_log import create_session_id, log_agent_message, log_task_state
+from drone_harness.logging.task_log import create_session_id, log_agent_message, log_task_state, log_navigation_plan
 from drone_harness.llm.client import create_llm_client
 from drone_harness.llm.prompts import build_system_prompt
 from drone_harness.runtime.task_state import TaskState, format_task_state_line
+from drone_harness.runtime.task_memory import input_directive, prepare_navigation_turn
 from drone_harness.runtime.safety import SafetyHandoffRequired
 from drone_harness.runtime.terminal import open_input_terminal
 from drone_harness.tools.registry import ToolContext
@@ -169,11 +170,33 @@ def _run_interactive_loop(
             continue
         if user_input.lower() in {"exit", "quit"}:
             break
-        if context.task_state is not None:
-            context.task_state.start_new_goal(user_input)
-        context.observation = None
-        context.depth_rules = None
-        context.navigation_plan = None
+        directive = input_directive(user_input) if context.navigation_enabled else "guide"
+        if directive in {"cancel", "replace"}:
+            from drone_harness.runtime.agent_loop import _stop_with_message
+
+            _stop_with_message(context, "原任务已取消。", safety_stop=True)
+            if context.navigation_plan is not None:
+                context.navigation_plan.status = "cancelled"
+                log_navigation_plan(context.profile, context.session_id, "cancelled", context.navigation_plan)
+            context.navigation_plan = None
+            context.navigation_resumable = False
+            context.execution_facts.clear()
+            # 明确取消或替换时隔离旧任务对话，避免模型从旧文字自行恢复。
+            conversation.clear()
+            if directive == "cancel":
+                context.observation = None
+                context.depth_rules = None
+                if context.task_state is not None:
+                    context.task_state.start_new_goal(user_input)
+                    context.task_state.set_idle()
+                log_agent_message(context.profile, context.session_id, "user", user_input)
+                conversation.extend([{"role": "user", "content": user_input},
+                                     {"role": "assistant", "content": "任务已取消，不再自动继续原任务。"}])
+                continue
+        resumed = prepare_navigation_turn(context, user_input, replace_task=directive == "replace")
+        if resumed:
+            print("plan> 已保留原任务和清单，接收本轮用户引导。")
+            log_navigation_plan(context.profile, context.session_id, "resumed", context.navigation_plan)
         conversation.append({"role": "user", "content": user_input})
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": build_system_prompt(context.profile)},

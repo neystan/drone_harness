@@ -17,6 +17,7 @@ from drone_harness.runtime.safety import (
     should_end_turn_after_tool_result,
 )
 from drone_harness.runtime.task_state import format_task_state_line
+from drone_harness.runtime.task_memory import is_recoverable_rejection
 from drone_harness.tools.registry import ToolContext, get_tool_definition
 from drone_harness.tools import flight
 
@@ -153,6 +154,8 @@ def dispatch_tool_call(context: ToolContext, call: Any) -> dict:
         is_flight_tool=is_flight_tool,
     )
     result = definition.handler(context, arguments)
+    if context.navigation_enabled and is_recoverable_rejection(tool_name, result):
+        result = {**result, "motion_executed": False}
     log_tool_call(context.profile, context.session_id, tool_name, arguments, result)
     _update_task_state(context, "tool_finished", tool_name, result=result)
     if should_end_turn_after_tool_result(result):

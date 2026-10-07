@@ -36,6 +36,7 @@ class StorageConfig:
     photo_save_dir: str
     analysis_save_dir: str
     log_dir: str
+    save_observation_images: bool = False
 
     def __post_init__(self) -> None:
         """校验存储目录配置是否完整。"""
@@ -45,6 +46,8 @@ class StorageConfig:
             raise ValueError("storage.analysis_save_dir is required")
         if not self.log_dir:
             raise ValueError("storage.log_dir is required")
+        if not isinstance(self.save_observation_images, bool):
+            raise ValueError("storage.save_observation_images must be a boolean")
 
 
 @dataclass(frozen=True)
