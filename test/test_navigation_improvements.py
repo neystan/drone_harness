@@ -86,8 +86,8 @@ def test_other_errors_still_stop(tmp_path, monkeypatch, error):
     assert len(client.requests) == 1
 
 
-def test_guidance_resumes_plan_and_facts_without_images(tmp_path, monkeypatch):
-    """引导保留原目标与动作事实，中断动作不被当作成功。"""
+def test_guidance_resumes_plan_without_fact_summary_or_images(tmp_path, monkeypatch):
+    """引导保留原目标与文字，不再注入独立执行事实。"""
     context = nav_context(tmp_path)
     inputs = iter(["去路口后到红门", "降低一点", "exit"])
     context.message_bus = SimpleNamespace(consume_user_message=lambda: SimpleNamespace(content=next(inputs)),
@@ -108,24 +108,26 @@ def test_guidance_resumes_plan_and_facts_without_images(tmp_path, monkeypatch):
     request = client.requests[-1]
     assert "去路口后到红门" in request[0]["content"]
     assert "当前导航计划" in request[0]["content"]
-    assert "INTERRUPTED_BY_USER" in request[0]["content"]
-    assert "[2, 0, -3]" in request[0]["content"]
+    assert "程序记录的历史执行事实" not in request[0]["content"]
+    assert "[2, 0, -3]" not in request[0]["content"]
+    assert "用户中断" in str(request)
     assert all(isinstance(item["content"], str) for item in request)
     assert context.navigation_plan.original_instruction == "去路口后到红门"
     assert context.task_state.landing_authorized is False
 
 
-def test_compaction_retains_actual_motion_fact(tmp_path, monkeypatch):
-    """纯推进删除工具过程后，实际结束位置仍进入下一请求。"""
+def test_completion_preserves_scene_text_not_tool_result(tmp_path, monkeypatch):
+    """完成当前项后只保留文字，不另注入已删除的动作数据。"""
     context = nav_context(tmp_path)
     from drone_harness.tools import flight
     monkeypatch.setattr(flight, "up", Mock(return_value={"success": True, "final_position_ned": [0, 0, -7]}))
-    client = RecordingClient([planning_reply(), reply("up", {"distance_m": 5}), observe_reply(),
+    client = RecordingClient([planning_reply(), reply("up", {"distance_m": 5}, text="前方路口，右侧围栏遮挡入口"), observe_reply(),
                               planning_reply(("completed", "in_progress")),
                               planning_reply(("completed", "completed"), "hold")])
     loop.agent_loop(client, "test", messages(), context)
-    assert "[0, 0, -7]" in client.requests[-1][0]["content"]
-    assert "last_motion" in client.requests[-1][0]["content"]
+    assert "[0, 0, -7]" not in str(client.requests[-1])
+    assert "last_motion" not in client.requests[-1][0]["content"]
+    assert "前方路口，右侧围栏遮挡入口" in str(client.requests[-1])
     assert_tool_pairs(client.requests[-1])
 
 
@@ -244,18 +246,9 @@ def test_resume_preserves_counters_but_clears_authority(tmp_path, status, resuma
         assert context.navigation_plan is None
 
 
-def test_failed_attempt_does_not_erase_successful_motion(tmp_path):
-    """最近失败与最近成功动作分别保留，摘要有界且不是引用原结果。"""
-    from drone_harness.runtime.task_memory import record_execution_fact
-    context = nav_context(tmp_path)
-    result = {"success": True, "final_position_ned": [19, 0, -30], "target_position_ned": [18, 0, -30]}
-    record_execution_fact(context, "forward", result)
-    result["final_position_ned"][0] = 999
-    for _ in range(10):
-        record_execution_fact(context, "takeoff", {"success": False, "error": "ALREADY_IN_AIR"})
-    assert len(context.execution_facts) == 3
-    assert context.execution_facts["last_successful_motion"]["result"]["final_position_ned"] == [19, 0, -30]
-    assert "target_position_ned" not in str(context.execution_facts)
+def test_context_has_no_separate_execution_facts(tmp_path):
+    """移除事实缓存而非仅隐藏其提示文本。"""
+    assert not hasattr(nav_context(tmp_path), "execution_facts")
 
 
 def test_real_correction_requires_new_approval(tmp_path, monkeypatch):

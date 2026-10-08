@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from drone_harness.runtime.navigation import is_pure_progress, parse_navigation_plan, update_navigation_plan
+from drone_harness.runtime.navigation import current_subgoal_completed, parse_navigation_plan, update_navigation_plan
 from drone_harness.tools.schemas import get_tool_schemas
 from test_agent_observation_loop import context_for
 
@@ -76,16 +76,16 @@ def test_free_rewrite_reopen_delete_and_repeat(tmp_path):
     assert not repeated["changed"] and not repeated["compact_history"]
 
 
-def test_pure_progress_only():
-    """压缩只用于纯进度更新，不能把计划调整误判为完成段。"""
+def test_current_completion_even_when_future_plan_changes():
+    """当前项完成可清理，允许同时修改后续计划。"""
     old = parse_navigation_plan(plan_payload(), "原文")
     value = plan_payload(statuses=("completed", "in_progress"))
     new = parse_navigation_plan(value, "原文")
-    assert is_pure_progress(old, new)
+    assert current_subgoal_completed(old, new)
     value["subgoals"][1]["description"] = "改变目标"
-    assert not is_pure_progress(old, parse_navigation_plan(value, "原文"))
-    assert not is_pure_progress(new, old)
-    assert not is_pure_progress(None, new)
+    assert current_subgoal_completed(old, parse_navigation_plan(value, "原文"))
+    assert not current_subgoal_completed(new, old)
+    assert not current_subgoal_completed(None, new)
 
 
 @pytest.mark.parametrize("enabled,mode,visible", [(True, "simulation", True),

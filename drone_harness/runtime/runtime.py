@@ -180,7 +180,6 @@ def _run_interactive_loop(
                 log_navigation_plan(context.profile, context.session_id, "cancelled", context.navigation_plan)
             context.navigation_plan = None
             context.navigation_resumable = False
-            context.execution_facts.clear()
             # 明确取消或替换时隔离旧任务对话，避免模型从旧文字自行恢复。
             conversation.clear()
             if directive == "cancel":
@@ -210,8 +209,6 @@ def _run_interactive_loop(
             content = message.get("content")
             if message.get("role") == "assistant" and isinstance(content, str) and content:
                 conversation.append({"role": "assistant", "content": content})
-        if context.navigation_plan is not None:
-            conversation.append({"role": "assistant", "content": context.navigation_plan.conversation_summary()})
         # 降落、失败和中断的返回说明未必已加入 messages，也需留给下轮。
         last = messages[-1]
         if isinstance(answer, str) and answer and not (

@@ -107,24 +107,11 @@ def parse_navigation_plan(value: Any, original_instruction: str) -> NavigationPl
     return plan
 
 
-def is_pure_progress(old: NavigationPlan | None, new: NavigationPlan) -> bool:
-    """只有目标不变且纯推进时才允许压缩，不限制计划改写。"""
-    if old is None or old.finish_action != new.finish_action or len(old.subgoals) != len(new.subgoals):
-        return False
-    progressed = False
-    for before, after in zip(old.subgoals, new.subgoals):
-        if (before.id, before.description, before.completion_condition) != (
-                after.id, after.description, after.completion_condition):
-            return False
-        if before.status == "completed":
-            if before != after:
-                return False
-        elif after.status == "completed":
-            progressed = True
-        elif before.evidence != after.evidence or (before.status, after.status) not in {
-                ("pending", "pending"), ("pending", "in_progress"), ("in_progress", "in_progress")}:
-            return False
-    return progressed
+def current_subgoal_completed(old: NavigationPlan | None, new: NavigationPlan) -> bool:
+    """仅更新前的当前项被标为完成时清理，改写和删除不代表完成。"""
+    current = old.current if old is not None else None
+    return current is not None and any(
+        goal.id == current.id and goal.status == "completed" for goal in new.subgoals)
 
 
 def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -138,7 +125,7 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
         return {"success": False, "error": "INVALID_NAVIGATION_PLAN", "message": str(exc), "plan_changed": False}
     changed = old is None or (old.subgoals, old.finish_action, old.reason) != (
         plan.subgoals, plan.finish_action, plan.reason)
-    compact = changed and is_pure_progress(old, plan)
+    compact = changed and current_subgoal_completed(old, plan)
     if changed:
         context.navigation_plan = plan
         from drone_harness.logging.task_log import log_navigation_plan
@@ -171,9 +158,29 @@ def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | N
 
 def compact_navigation_history(messages: list[dict[str, Any]], task_start: int,
                                *, observation_current: bool) -> None:
-    """压缩已完成段，保留最新观察和本次计划调用的完整协议对。"""
+    """清理旧工具协议与观测，保留所有文字、最新图和本次计划协议对。"""
     latest = next((message for message in reversed(messages[task_start:])
                    if isinstance(message.get("content"), list)
                    and any(part.get("type") == "image_url" for part in message["content"])), None)
-    pair = messages[-2:]
-    messages[task_start:] = ([latest] if observation_current and latest is not None else []) + pair
+    retained = []
+    for message in messages[task_start:-2]:
+        if message["role"] == "tool":
+            continue
+        if message["role"] == "assistant":
+            if message.get("content"):
+                retained.append({"role": "assistant", "content": message["content"]})
+        elif message is latest:
+            # 保留最新图用于历史对照，但不能让失效深度冒充当前位置的测量。
+            if observation_current:
+                retained.append(message)
+            elif not any(part.get("type") == "text" and part.get("text", "").startswith("历史观察：拍摄后已发生动作")
+                         for part in message["content"]):
+                retained.append({**message, "content": [
+                    {"type": "text", "text": "历史观察：拍摄后已发生动作，仅供对照，深度不代表当前位置。"},
+                    *message["content"],
+                ]})
+            else:
+                retained.append(message)
+        elif isinstance(message.get("content"), str):
+            retained.append(message)
+    messages[task_start:] = retained + messages[-2:]

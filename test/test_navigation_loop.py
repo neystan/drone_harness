@@ -285,7 +285,7 @@ def test_next_user_turn_keeps_text_but_clears_plan(tmp_path):
     client = RecordingClient([observe_reply(), finish, reply(text="上轮是模型完成判断")])
     _run_interactive_loop(client, "vlm", context, loop_module.agent_loop, input_terminal_started=True)
     assert "路口两侧道路清晰" in str(client.requests[-1])
-    assert "导航进度" in str(client.requests[-1])
+    assert "导航进度：" not in str(client.requests[-1])
     assert all(isinstance(item["content"], str) and "tool_calls" not in item for item in client.requests[-1])
     assert context.navigation_plan is None and context.observation is None
 

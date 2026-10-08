@@ -27,11 +27,12 @@ from test_stage3_observe import tool_call
 def test_system_prompt_focuses_on_navigation_not_tool_implementation(tmp_path):
     """系统规则只保留任务推进、观察顺序、绕障与完成后降落。"""
     prompt = build_system_prompt(context_for(tmp_path).profile)
-    for phrase in ("长导航任务飞行规划器", "旋转", "重新观察", "深度", "确定性", "上升", "下降", "land", "不要降落"):
+    for phrase in ("长导航任务飞行规划器", "旋转", "重新观察", "深度", "确定性", "上升", "下降", "land"):
         assert phrase in prompt
     for removed in ("单目标", "候选完成", "观测号", "同号", "第二个视觉模型", "19 米", "1000", "不重复索取"):
         assert removed not in prompt
-    assert "缺失" in prompt and "障碍" in prompt
+    assert "障碍" in prompt and "不默认视野外的上方或下方安全" in prompt
+    assert "深度前进上限不是目标距离" in prompt
 
 
 @pytest.mark.parametrize("name,forward,vertical", [("sim", "19", "10"), ("real", "0.2", "2")])

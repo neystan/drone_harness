@@ -18,7 +18,7 @@ from drone_harness.runtime.navigation import (
 from drone_harness.runtime.observation import ObservationSnapshot, build_observation_message
 from drone_harness.runtime.safety import EndCurrentTurn, SafetyHandoffRequired, request_confirmed_hover
 from drone_harness.runtime.task_state import format_task_state_line
-from drone_harness.runtime.task_memory import inject_execution_facts, record_execution_fact, is_recoverable_rejection
+from drone_harness.runtime.task_memory import is_recoverable_rejection
 from drone_harness.runtime.tool_dispatcher import dispatch_tool_call
 from drone_harness.tools.registry import ToolContext, get_tool_schemas
 from drone_harness.vision.depth_rules import compute_depth_rules
@@ -54,16 +54,14 @@ def agent_loop(
         if plan is not None:
             interruption = interrupt_if_requested(context, hover_on_flight_tool=False)
             if interruption is not None:
-                record_execution_fact(context, "user_intervention", interruption)
                 return _stop_with_message(context, interruption["message"], safety_stop=True)
         _record_task_state(context, "thinking")
         requests += 1
         try:
             response = client.chat.completions.create(
                 model=model,
-                messages=(inject_execution_facts(
-                    navigation_messages(messages, plan, observation_current=_navigation_observation_current(context)),
-                    context.execution_facts) if navigation_enabled else messages),
+                messages=(navigation_messages(messages, plan, observation_current=_navigation_observation_current(context))
+                          if navigation_enabled else messages),
                 tools=get_tool_schemas(context.profile, navigation_enabled=navigation_enabled),
                 tool_choice="auto",
                 temperature=0.0,
@@ -95,7 +93,6 @@ def agent_loop(
                        "motion_executed": False,
                        "message": "本轮模型提出多个工具调用，全部拒绝且未执行；请每次只调用一个工具。"}
             _skip_navigation_calls(context, messages, tool_calls, refusal)
-            record_execution_fact(context, "multiple_tool_calls", refusal)
             corrections += 1
             if navigation_enabled and corrections <= MAX_CORRECTIONS:
                 continue
@@ -126,8 +123,6 @@ def agent_loop(
             tool_result = dispatch_tool_call(context, call)
         except EndCurrentTurn as exc:
             _append_turn_end_tool_results(messages, tool_calls, 0, exc)
-            record_execution_fact(context, call.function.name, exc.tool_result or
-                                  {"success": False, "error": "TURN_ABORTED"})
             return _stop_with_message(context, str(exc), safety_stop=plan is not None)
         except SafetyHandoffRequired:
             context.navigation_resumable = False
@@ -139,7 +134,6 @@ def agent_loop(
         if recoverable:
             tool_result = {**tool_result, "motion_executed": False,
                            "recovery_hint": "未发布本次位置目标；请结合状态纠正参数或选择其他工具。"}
-        record_execution_fact(context, call.function.name, tool_result)
         view_changed = bool(tool_result.get("success")) and _motion_changed_view(call.function.name, tool_result)
         if view_changed:
             if context.profile.post_motion_wait_enabled:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import time
 from typing import Any, Callable
 
@@ -44,7 +44,6 @@ class ToolContext:
     navigation_enabled: bool = False
     navigation_plan: NavigationPlan | None = None
     navigation_instruction: str = ""
-    execution_facts: dict[str, Any] = field(default_factory=dict)
     navigation_resumable: bool = True
 
 
