@@ -8,6 +8,15 @@
 
 仿真顺序批测入口为 `python3 scripts/run_sim_batch.py`，支持自选 case/区间、整表循环、runtime 提前退出即结算下一条、实时画面与工具叠加录像，以及逐条/每轮/全批指标汇总。使用方法、磁盘预算和验证边界以后更新在桌面 [仿真批量测试](/home/stan/桌面/仿真批量测试.md)；可先加 `--dry-run` 做只读检查。
 
+默认预览和录像均为 20 FPS；源相机停帧不伪装成新画面，实际帧龄与工具输出时间线单独保存。[五例两轮配置](config/sim_batch.simple-five.json) 保留英文导航原文并要求中文回答，每例最多 30 分钟：
+
+```bash
+python3 scripts/run_sim_batch.py --config config/sim_batch.simple-five.json --dry-run
+python3 scripts/run_sim_batch.py --config config/sim_batch.simple-five.json
+```
+
+评测适配仓库另需 [批测适配补丁](scripts/aerialvln_batch_adapter.patch)，适用于 `AirVLN-theta-star` 基线 `2fb19e6`；先在对应仓库执行 `git apply --check /绝对路径/aerialvln_batch_adapter.patch`，再应用。不要覆盖已有的冲突改动或向 AirVLN 官方上游推送本地修订。
+
 - Python/ROS 包：`drone_harness`
 - 仿真入口：`drone_harness_sim`
 - 真机入口：`drone_harness_real`（Phase 1 不进行真机自主飞行）

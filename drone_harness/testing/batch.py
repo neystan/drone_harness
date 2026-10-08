@@ -261,10 +261,13 @@ def run_case(config: dict, episode: dict, index: int, root: Path, env: dict) -> 
     finally:
         if stop.is_file():
             reason = json.loads(stop.read_text())["end_reason"]
+        elif (scene_dir / "evaluation.json").is_file():
+            # 评分器可能比 runtime 更早确认降落，不能沿用循环初始化的超时原因。
+            reason = json.loads((scene_dir / "evaluation.json").read_text())["end_reason"]
         if reason in {"disk_low", "video_size_limit", "batch_user_stop", "recorder_error"}:
             halt_batch = True
         # runtime 正常返回时由评分器自行读取结果；提前写停止信号会误覆盖刚完成的降落。
-        needs_stop_signal = not runtime_result.is_file() or reason in {
+        needs_stop_signal = (not runtime_result.is_file() and not (scene_dir / "evaluation.json").is_file()) or reason in {
             "case_timeout", "runtime_user_exit", "batch_user_stop", "disk_low", "video_size_limit",
             "recorder_error", "recorder_exited", "component_exited", "batch_interrupted"}
         if needs_stop_signal:

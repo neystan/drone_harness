@@ -166,6 +166,39 @@ def test_runtime_stop_finalizes_before_process_cleanup(tmp_path, monkeypatch, co
     assert events.index("scored") < events.index("stop_scene")
 
 
+def test_evaluation_finishes_before_runtime_without_false_timeout(tmp_path, monkeypatch):
+    """正常降落先被评分器确认时，停止标志不得误记为超时。"""
+    class FakeProcess:
+        def __init__(self, command, log_path, **kwargs):
+            self.name = log_path.stem
+            self.root = log_path.parent
+            self.process = self
+            self.returncode = None
+            log_path.write_text("evaluation_ready:\n" if self.name == "scene" else
+                                "Ready for takeoff!\n" if self.name == "px4" else "")
+            if self.name == "agent":
+                write_json(self.root / "scene/evaluation.json", {"status": "completed",
+                    "end_reason": "successful_land", "metrics": {"NE": 1.0, "SR": 1, "OSR": 1, "steps_taken": 4}})
+        def poll(self):
+            return self.returncode
+        def wait(self, timeout):
+            if self.name == "agent":
+                assert not (self.root / "stop.json").exists()
+                write_json(self.root / "runtime_result.json", {"status": "completed", "end_reason": "runtime_completed"})
+            self.returncode = 0
+        def stop(self):
+            self.returncode = 0
+    monkeypatch.setattr(batch, "ManagedProcess", FakeProcess)
+    monkeypatch.setattr(batch, "occupied_sim_ports", lambda: [])
+    monkeypatch.setattr(batch, "pending_px4_tcp_restart", lambda: False)
+    config = {**batch.DEFAULTS, "record": False, "preview": False}
+    root = tmp_path / "attempt"
+    result = batch.run_case(config, episodes()[0], 0, root, {"PATH": "/usr/bin"})
+    assert result["end_reason"] == "successful_land" and result["SR"] == 1
+    assert result["runtime_status"] == "completed" and not result["halt_batch"]
+    assert json.loads((root / "stop.json").read_text())["end_reason"] == "successful_land"
+
+
 def test_missing_final_report_recovers_saved_checkpoint(tmp_path, monkeypatch):
     """评分器提前退出时保留已保存的指标，但不能恢复成成功。"""
     class FakeProcess:
