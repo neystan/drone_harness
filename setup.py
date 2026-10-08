@@ -42,6 +42,7 @@ setup(
         "socksio==1.*",
     ],
     zip_safe=True,
+    extras_require={"batch": ["imageio-ffmpeg>=0.6,<1", "Pillow>=9"]},
     maintainer="hw",
     maintainer_email="toplaya@126.com",
     description="Single-target RGB-D UAV harness based on ROS2, MAVROS, and PX4.",

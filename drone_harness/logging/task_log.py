@@ -98,6 +98,7 @@ def log_task_state(
         "current_phase": snapshot["current_phase"],
         "current_user_goal": snapshot["current_user_goal"],
         "active_tool_name": snapshot["active_tool_name"],
+        "active_tool_arguments": snapshot["active_tool_arguments"],
         "active_tool_is_flight_tool": snapshot["active_tool_is_flight_tool"],
         "waiting_for_user_confirmation": snapshot["waiting_for_user_confirmation"],
         "intervention_pending": snapshot["intervention_pending"],

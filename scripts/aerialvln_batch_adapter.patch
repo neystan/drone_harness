@@ -1,0 +1,189 @@
+diff --git a/tools/aerialvln_evaluation.py b/tools/aerialvln_evaluation.py
+index fdd9a6a..9e7f39c 100644
+--- a/tools/aerialvln_evaluation.py
++++ b/tools/aerialvln_evaluation.py
+@@ -17,7 +17,7 @@ from tools.aerialvln_case import load_raw_episodes
+ 
+ SUCCESS_DISTANCE_M = 20.0
+ DEFAULT_AGENT_LOG_ROOT = Path("/home/stan/AirVLN/drone_agent_runtime/logs/sim")
+-COUNTED_STEP_TOOLS = frozenset({"takeoff", "move", "rotate", "return_home"})
++COUNTED_STEP_TOOLS = frozenset({"takeoff", "move", "forward", "up", "down", "rotate", "return_home"})
+ 
+ 
+ class AmbiguousAgentSessionError(RuntimeError):
+@@ -160,11 +160,14 @@ class ToolCallStats:
+             return
+         tool_name = event.get("tool_name")
+         result = event.get("result")
++        arguments = event.get("arguments")
++        arguments = arguments if isinstance(arguments, dict) else {}
+         success = isinstance(result, dict) and result.get("success") is True
+         self.attempted_calls += 1
+         if success:
+             self.successful_calls += 1
+-            if tool_name in COUNTED_STEP_TOOLS:
++            if (tool_name in COUNTED_STEP_TOOLS and result.get("motion_executed") is not False
++                    and not (tool_name == "rotate" and arguments.get("degrees") == 0)):
+                 self.steps_taken += 1
+             if tool_name == "land":
+                 self.land_succeeded = True
+@@ -256,6 +259,7 @@ def build_report(
+         "metrics": state.metrics(completed, tool_stats.steps_taken),
+         "diagnostics": {
+             "success_distance_m": SUCCESS_DISTANCE_M,
++            "steps_definition": "successful_motion_tools_v2: takeoff/move/forward/up/down/rotate/return_home; exclude explicit no-motion and zero rotation",
+             "sample_interval_s": state.sample_interval_s,
+             "minimum_distance_m": state.minimum_distance_m,
+             "pose_sample_count": state.sample_count,
+@@ -314,6 +318,8 @@ def monitor_evaluation(
+     sample_interval_s: float = 0.2,
+     timeout_s: float = 3600.0,
+     max_consecutive_pose_failures: int = 5,
++    agent_result_path: Path | None = None,
++    stop_file: Path | None = None,
+     clock: Callable[[], float] = time.monotonic,
+     sleep: Callable[[float], None] = time.sleep,
+     utc_now: Callable[[], str] = _utc_now,
+@@ -338,11 +344,18 @@ def monitor_evaluation(
+     status = "incomplete"
+     end_reason = "evaluation_timeout"
+     error_message = None
++    checkpoint_path = output_path.with_name("evaluation_progress.json")
++    trajectory_path = output_path.with_name("trajectory.jsonl")
++    output_path.parent.mkdir(parents=True, exist_ok=True)
++    next_checkpoint = clock()
+ 
+     try:
+         while True:
+             try:
+-                state.add_pose(read_absolute_position(client, vehicle_name))
++                position = read_absolute_position(client, vehicle_name)
++                state.add_pose(position)
++                with trajectory_path.open("a", encoding="utf-8") as handle:
++                    handle.write(json.dumps({"timestamp": utc_now(), "position_ned": list(position)}) + "\n")
+                 consecutive_pose_failures = 0
+             except Exception:
+                 pose_rpc_failures += 1
+@@ -367,6 +380,21 @@ def monitor_evaluation(
+                     if tool_stats.land_succeeded:
+                         break
+ 
++            # 定期落盘，使评分器异常退出时仍可恢复最后一次已保存的指标。
++            if clock() >= next_checkpoint:
++                write_evaluation_report(checkpoint_path, build_report(
++                    target, state, tool_stats, status="incomplete", end_reason="running",
++                    agent_session_id=session_path.name if session_path is not None else None,
++                    started_at=started_at, ended_at=utc_now(), pose_rpc_failures=pose_rpc_failures,
++                    malformed_log_lines=log_tail.malformed_lines if log_tail is not None else 0))
++                next_checkpoint = clock() + 1.0
++
++            # 调度器已超时/中断时优先按终止信号结算，避免收停期间的降落结果覆盖失败原因。
++            if stop_file is not None and stop_file.is_file():
++                result = json.loads(stop_file.read_text(encoding="utf-8"))
++                end_reason = result.get("end_reason", "batch_stopped_case")
++                break
++
+             if tool_stats.land_succeeded:
+                 try:
+                     state.add_pose(read_absolute_position(client, vehicle_name))
+@@ -378,6 +406,12 @@ def monitor_evaluation(
+                 end_reason = "successful_land"
+                 break
+ 
++            # 单任务入口返回或调度器终止时立即结算，不等待下一次人工输入。
++            if agent_result_path is not None and agent_result_path.is_file():
++                result = json.loads(agent_result_path.read_text(encoding="utf-8"))
++                end_reason = result.get("end_reason", "runtime_stopped")
++                break
++
+             if clock() >= deadline:
+                 end_reason = "no_agent_session" if session_path is None else "evaluation_timeout"
+                 break
+diff --git a/tools/aerialvln_px4_launch.py b/tools/aerialvln_px4_launch.py
+index 39c8cc6..f7815f3 100644
+--- a/tools/aerialvln_px4_launch.py
++++ b/tools/aerialvln_px4_launch.py
+@@ -65,6 +65,8 @@ def _parser() -> argparse.ArgumentParser:
+     parser.add_argument("--evaluation-sample-interval", type=float, default=0.2)
+     parser.add_argument("--evaluation-timeout-seconds", type=float, default=3600.0)
+     parser.add_argument("--agent-log-root", type=Path, default=DEFAULT_AGENT_LOG_ROOT)
++    parser.add_argument("--agent-result-file", type=Path, help="单任务 runtime 结束结果")
++    parser.add_argument("--stop-file", type=Path, help="批测调度器的本条终止信号")
+     return parser
+ 
+ 
+@@ -234,15 +236,24 @@ def capture_scene_image(client: Any, vehicle_name: str, camera_name: str) -> dic
+ 
+ 
+ def _terminate(process: subprocess.Popen[Any], log_file: Any) -> None:
+-    if process.poll() is None:
+-        try:
+-            os.killpg(process.pid, signal.SIGTERM)
+-            process.wait(timeout=10)
+-        except (ProcessLookupError, subprocess.TimeoutExpired):
+-            if process.poll() is None:
+-                os.killpg(process.pid, signal.SIGKILL)
+-                process.wait(timeout=5)
+-    log_file.close()
++    """按拥有的进程组收停，不能因启动脚本已退出而遗漏 Unreal 子进程。"""
++    try:
++        for signum, timeout_s in ((signal.SIGTERM, 10.0), (signal.SIGKILL, 5.0)):
++            try:
++                os.killpg(process.pid, signum)
++            except ProcessLookupError:
++                return
++            deadline = time.monotonic() + timeout_s
++            while time.monotonic() < deadline:
++                process.poll()
++                try:
++                    os.killpg(process.pid, 0)
++                except ProcessLookupError:
++                    return
++                time.sleep(0.1)
++        process.wait(timeout=1)
++    finally:
++        log_file.close()
+ 
+ 
+ def main(argv: list[str] | None = None) -> int:
+@@ -250,6 +261,13 @@ def main(argv: list[str] | None = None) -> int:
+     run_dir: Path | None = None
+     process = None
+     log_file = None
++    # 场景拥有独立进程组；调度器结束 launcher 时仍需进入 finally 收停场景。
++    previous_sigterm = signal.getsignal(signal.SIGTERM)
++    previous_sigint = signal.getsignal(signal.SIGINT)
++    def terminate_requested(signum: int, frame: Any) -> None:
++        """把外部停止信号转为可清理的退出。"""
++        raise KeyboardInterrupt
++    signal.signal(signal.SIGTERM, terminate_requested)
+     try:
+         _validate_args(args)
+         case = select_case(
+@@ -319,6 +337,8 @@ def main(argv: list[str] | None = None) -> int:
+                 baseline_sessions,
+                 sample_interval_s=args.evaluation_sample_interval,
+                 timeout_s=args.evaluation_timeout_seconds,
++                agent_result_path=args.agent_result_file,
++                stop_file=args.stop_file,
+             )
+             print(json.dumps(report, ensure_ascii=False, indent=2))
+             if report["end_reason"] == "interrupted":
+@@ -338,8 +358,15 @@ def main(argv: list[str] | None = None) -> int:
+             (run_dir / "preflight-error.txt").write_text(f"{type(exc).__name__}: {exc}\n", encoding="utf-8")
+         return 2
+     finally:
+-        if process is not None:
+-            _terminate(process, log_file)
++        # 清理有界等待期间不再被第二个停止信号打断，确保独立场景进程组被收停。
++        signal.signal(signal.SIGINT, signal.SIG_IGN)
++        signal.signal(signal.SIGTERM, signal.SIG_IGN)
++        try:
++            if process is not None:
++                _terminate(process, log_file)
++        finally:
++            signal.signal(signal.SIGTERM, previous_sigterm)
++            signal.signal(signal.SIGINT, previous_sigint)
+ 
+ 
+ if __name__ == "__main__":

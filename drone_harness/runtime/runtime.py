@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import threading
 import sys
-from dataclasses import dataclass
+import json
+import os
+import time
+from pathlib import Path
+from dataclasses import dataclass, replace
 from typing import Any
 
 from drone_harness.bus import InputServer, MessageBus
@@ -46,6 +50,30 @@ def start_runtime(profile_name: str) -> None:
     _start_live_runtime(profile)
 
 
+def start_single_runtime(instruction_file: Path, result_file: Path, log_dir: Path,
+                         *, startup_timeout_s: float = 60.0) -> int:
+    """只执行一次仿真任务，结束后写结果并退出，不接收续聊。"""
+    result = {"status": "incomplete", "end_reason": "runtime_error"}
+    try:
+        instruction = instruction_file.read_text(encoding="utf-8").strip()
+        if not instruction:
+            raise ValueError("导航指令不能为空")
+        profile = load_profile("sim")
+        profile = replace(profile, storage=replace(profile.storage, log_dir=str(log_dir)))
+        result = _start_live_runtime(profile, instruction=instruction, startup_timeout_s=startup_timeout_s)
+    except KeyboardInterrupt:
+        result["end_reason"] = "runtime_interrupted"
+    except Exception as exc:
+        result["error"] = type(exc).__name__
+        print(f"single-task> {type(exc).__name__}", file=sys.stderr, flush=True)
+    finally:
+        result_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = result_file.with_name(result_file.name + ".tmp")
+        temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, result_file)
+    return 0 if result["status"] == "completed" else 1
+
+
 def controller_class_for_profile(mode: str) -> type[Any]:
     """返回当前 profile 使用的原名 PX4 控制器类。"""
     if mode not in {"simulation", "real"}:
@@ -61,14 +89,20 @@ def _join_started_thread(thread: threading.Thread | None) -> None:
         thread.join(timeout=1.0)
 
 
-def _start_live_runtime(profile) -> None:
+def _start_live_runtime(profile, *, instruction: str | None = None,
+                        startup_timeout_s: float = 60.0) -> dict[str, Any] | None:
     """创建 ROS2、PX4 controller 和 agent loop 的完整运行时。"""
     import rclpy
     from rclpy.executors import SingleThreadedExecutor
 
     from drone_harness.runtime.agent_loop import agent_loop
 
-    rclpy.init()
+    if instruction is not None:
+        from rclpy.signals import SignalHandlerOptions
+        # 单任务退出由 Python 接收信号后按 finally 顺序收停，避免后台先失去 ROS context。
+        rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+    else:
+        rclpy.init()
     executor = SingleThreadedExecutor()
     controller = None
     executor_thread = None
@@ -78,8 +112,9 @@ def _start_live_runtime(profile) -> None:
         session_id = create_session_id()
         task_state = TaskState(task_id=session_id)
         message_bus = MessageBus()
-        input_server = InputServer(message_bus)
-        input_server.start()
+        if instruction is None:
+            input_server = InputServer(message_bus)
+            input_server.start()
         controller_class = controller_class_for_profile(profile.mode)
         controller = controller_class(
             node_name=profile.ros.node_name,
@@ -101,8 +136,10 @@ def _start_live_runtime(profile) -> None:
             navigation_enabled=True,
         )
         executor_thread.start()
-        input_terminal_started = _start_input_terminal(input_server, profile.name)
         log_agent_message(profile, context.session_id, "system", build_system_prompt(profile))
+        if instruction is not None:
+            return _run_single_navigation(client, context, agent_loop, instruction, startup_timeout_s)
+        input_terminal_started = _start_input_terminal(input_server, profile.name)
         _run_interactive_loop(
             client,
             profile.llm.model,
@@ -114,6 +151,8 @@ def _start_live_runtime(profile) -> None:
         message = str(exc)
         print(message, file=sys.stderr, flush=True)
         log_agent_message(profile, session_id, "safety", message)
+        if instruction is not None:
+            return {"status": "incomplete", "end_reason": "safety_handoff", "session_id": session_id}
     finally:
         if input_server is not None:
             input_server.stop()
@@ -123,6 +162,34 @@ def _start_live_runtime(profile) -> None:
         if rclpy.ok():
             rclpy.shutdown()
         _join_started_thread(executor_thread)
+
+
+def _run_single_navigation(client: Any, context: ToolContext, run_agent: Any,
+                           instruction: str, startup_timeout_s: float = 60.0) -> dict[str, Any]:
+    """先等待 PX4 位姿与配对观测，再调用一次原 agent loop。"""
+    deadline = time.monotonic() + startup_timeout_s
+    controller = context.controller
+    ready = False
+    while time.monotonic() < deadline:
+        if (getattr(controller.vehicle_status, "connected", False)
+                and controller.uav_position_is_valid()):
+            snapshot = controller.wait_for_observation(timeout_s=0.5)
+            if (snapshot is not None and snapshot.depth is not None
+                    and snapshot.intrinsics is not None and not snapshot.depth_error):
+                ready = True
+                break
+        time.sleep(0.1)
+    if not ready:
+        return {"status": "incomplete", "end_reason": "runtime_not_ready", "session_id": context.session_id}
+    prepare_navigation_turn(context, instruction)
+    log_agent_message(context.profile, context.session_id, "user", instruction)
+    messages = [{"role": "system", "content": build_system_prompt(context.profile)},
+                {"role": "user", "content": instruction}]
+    answer = run_agent(client, context.profile.llm.model, messages, context)
+    completed = context.navigation_plan is not None and context.navigation_plan.status == "completed"
+    return {"status": "completed" if completed else "incomplete",
+            "end_reason": "runtime_completed" if completed else "runtime_stopped",
+            "session_id": context.session_id, "answer": answer}
 
 
 def _configure_readline() -> None:

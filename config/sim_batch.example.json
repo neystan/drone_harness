@@ -1,0 +1,17 @@
+{
+  "cases": "351,397,485",
+  "scenes": [9, 13, 21, 24],
+  "repeat": 1,
+  "case_timeout_s": 1800,
+  "startup_timeout_s": 120,
+  "record": true,
+  "preview": true,
+  "preview_fps": 20,
+  "video_fps": 20,
+  "response_language": "zh",
+  "video_width": 640,
+  "video_bitrate_kbps": 500,
+  "video_max_mb": 512,
+  "min_free_gb": 5,
+  "output_root": "/home/stan/AirVLN/drone_harness_runtime/batches"
+}
