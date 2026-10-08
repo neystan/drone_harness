@@ -179,6 +179,7 @@ class AsyncVideoWriter:
         self.fps, self.frames, self.error = fps, 0, None
         self.lock = threading.Lock()
         self.latest = None
+        self.revision = 0
         self.stopping = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -186,28 +187,33 @@ class AsyncVideoWriter:
     def submit(self, frame, metadata: dict) -> None:
         """最新图替换待采样图；画面和日志元数据一起交给编码器。"""
         with self.lock:
-            self.latest = (frame, dict(metadata))
+            self.revision += 1
+            self.latest = (frame, dict(metadata), self.revision)
 
     def _run(self) -> None:
         """记录每个已编码画面使用的相机帧与控制台事件。"""
         import json
         deadline = None
+        written_revision = 0
         try:
             with self.timeline_path.open('w', encoding='utf-8') as timeline:
-                while not self.stopping.is_set():
+                while True:
                     with self.lock:
                         latest = self.latest
+                    if self.stopping.is_set() and (latest is None or latest[2] == written_revision):
+                        break
                     if latest is None:
                         self.stopping.wait(0.005)
                         continue
                     if deadline is None:
                         deadline = time.monotonic()
-                    frame, metadata = latest
+                    frame, metadata, revision = latest
                     self.encoder.write(frame)
                     timeline.write(json.dumps({**metadata, 'frame_index': self.frames,
                         'pts_s': self.frames / self.fps, 'encoded_monotonic_ns': time.monotonic_ns()}) + '\n')
                     timeline.flush()
                     self.frames += 1
+                    written_revision = revision
                     deadline += 1 / self.fps
                     self.stopping.wait(max(0, deadline - time.monotonic()))
         except Exception as exc:

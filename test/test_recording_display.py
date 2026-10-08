@@ -81,3 +81,16 @@ def test_async_encoder_saves_20fps_and_frame_timeline(tmp_path):
     check = subprocess.run([ffmpeg_executable(), '-v', 'error', '-i', str(tmp_path / 'flight.mp4'),
                             '-f', 'null', '-'], capture_output=True)
     assert check.returncode == 0, check.stderr
+
+
+def test_async_encoder_drains_last_submitted_frame_on_close(tmp_path):
+    from drone_harness.testing.recording_display import AsyncVideoWriter
+    writer = AsyncVideoWriter(tmp_path / 'final.mp4', 160, 120, 20, 100)
+    frame = np.zeros((120, 160, 3), np.uint8)
+    writer.submit(frame, {'console_offset': 1})
+    time.sleep(0.08)
+    writer.submit(frame, {'console_offset': 999, 'final_tool_result': True})
+    writer.close()
+    events = [json.loads(line) for line in (tmp_path / 'frame_timeline.jsonl').read_text().splitlines()]
+    assert writer.error is None
+    assert events[-1]['console_offset'] == 999 and events[-1]['final_tool_result']

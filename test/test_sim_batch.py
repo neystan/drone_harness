@@ -249,6 +249,7 @@ def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monke
     except RuntimeError:
         pytest.skip("尚未安装 FFmpeg")
     write_json(tmp_path / "case_identity.json", {"case_index": 351, "scene_id": 24})
+    (tmp_path / "console_timeline.jsonl").touch()
     session = tmp_path / "agent_logs/session_test"
     session.mkdir(parents=True)
     (session / "task_state.jsonl").write_text(json.dumps({"current_phase": "tool_running",
@@ -269,6 +270,10 @@ def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monke
         count += 1
         time.sleep(0.02)
         if count == 20:
+            # 最后一批工具结果与停止信号同时到来，也必须进入最后一帧。
+            (tmp_path / "console_timeline.jsonl").write_text(json.dumps({
+                "captured_monotonic_ns": time.monotonic_ns(), "console_closed": True,
+                "text": "state> tool_failed forward error=MOVE_TIMEOUT\nagent> 本轮停止。\n"}) + "\n")
             write_json(tmp_path / "stop.json", {"end_reason": "offline_test_end"})
     fake_ros = SimpleNamespace(init=lambda **kwargs: None, create_node=lambda name: node,
                               spin_once=spin_once, ok=lambda: True, shutdown=lambda: None)
@@ -283,6 +288,8 @@ def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monke
     metadata = json.loads((tmp_path / "recording.json").read_text())
     assert metadata["frames"] >= 2 and metadata["bytes"] > 1000 and metadata["error"] is None
     assert (tmp_path / "recorder_ready.json").is_file() and "destroyed" in calls
+    frames = [json.loads(line) for line in (tmp_path / "frame_timeline.jsonl").read_text().splitlines()]
+    assert frames[-1]["console_offset"] == (tmp_path / "console_timeline.jsonl").stat().st_size
 
 
 @pytest.mark.parametrize("mode", ["normal", "crash", "timeout"])

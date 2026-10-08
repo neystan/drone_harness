@@ -147,6 +147,11 @@ class ManagedProcess:
                 timeline.write(json.dumps({'captured_monotonic_ns': captured,
                     'captured_wall_ns': time.time_ns(), 'text': decoder.decode(chunk)}, ensure_ascii=False) + '\n')
                 timeline.flush()
+            # 明确输出已结束，录像可读取最后一批提示后再封装。
+            timeline.write(json.dumps({'captured_monotonic_ns': time.monotonic_ns(),
+                'captured_wall_ns': time.time_ns(), 'text': decoder.decode(b'', final=True),
+                'console_closed': True}, ensure_ascii=False) + '\n')
+            timeline.flush()
 
     def stop(self) -> None:
         """先发可清理的信号，超时再结束本进程组的剩余进程。"""

@@ -81,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     state = {"current_phase": "waiting"}
     console_offset = 0
     console_captured_ns = 0
+    console_closed = False
+    canvas = None
     console_lags = []
     frame_ages = []
     render_times = []
@@ -95,6 +97,25 @@ def main(argv: list[str] | None = None) -> int:
         """外部停止只触发正常封装，不在信号回调里操作 ROS。"""
         nonlocal running
         running = False
+
+    def read_console() -> bool:
+        """正常刷新和退出收尾共用增量读取，不漏掉最后的工具结果。"""
+        nonlocal console_offset, console_captured_ns, console_closed
+        fresh = False
+        events = console_timeline.read()
+        if console_timeline.path.is_file():
+            for event in events:
+                text = event.get("text", "")
+                panel.append(text)
+                if text:
+                    console_captured_ns = int(event.get("captured_monotonic_ns", 0))
+                    fresh = True
+                console_closed = console_closed or event.get("console_closed", False)
+            console_offset = console_timeline.offset
+        else:
+            panel.append(raw_console.read())
+            console_offset = raw_console.offset
+        return fresh
 
     def receive(message: Image) -> None:
         """保存最新彩色帧及源时间，后台不绘字、不编码。"""
@@ -167,17 +188,7 @@ def main(argv: list[str] | None = None) -> int:
                 panel.append("等待原始 agent 输出；上下页键回看，End 回到实时。\n")
                 if args.preview:
                     cv2.resizeWindow(title, args.width + panel_width, panel_height + 64)
-            events = console_timeline.read()
-            fresh_console = False
-            if (root / "console_timeline.jsonl").is_file():
-                for event in events:
-                    panel.append(event.get("text", ""))
-                    console_captured_ns = int(event.get("captured_monotonic_ns", 0))
-                    fresh_console = True
-                console_offset = console_timeline.offset
-            else:
-                panel.append(raw_console.read())
-                console_offset = raw_console.offset
+            fresh_console = read_console()
             if state_tail is None:
                 sessions = list((root / "agent_logs").glob("session_*"))
                 if len(sessions) == 1:
@@ -232,6 +243,27 @@ def main(argv: list[str] | None = None) -> int:
         write_json(stop, {"end_reason": "recorder_error"})
         print(error, flush=True)
     finally:
+        if panel is not None and canvas is not None and writer is not None and not writer.error:
+            # 只等终端收尾，不再继续导航；最多两秒，完整原始日志始终另存。
+            drain_deadline = time.monotonic() + 2
+            while console_timeline.path.is_file() and not console_closed and time.monotonic() < drain_deadline:
+                read_console()
+                if not console_closed:
+                    time.sleep(0.01)
+            read_console()
+            snapshot = camera.get()
+            if snapshot is not None:
+                frame, frame_info = snapshot
+                canvas = canvas.copy()
+                canvas[64:64 + image_height, :args.width] = cv2.resize(frame, (args.width, image_height))
+                canvas[64:, args.width:] = panel.render(live=True)
+                composed_ns = time.monotonic_ns()
+                age_ms = max(0, (composed_ns - frame_info["camera_receive_monotonic_ns"]) / 1e6)
+                cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 31), (0, 0, 0), -1)
+                cv2.putText(canvas, f"case {info['case_index']} | FINAL | camera {age_ms:.0f} ms",
+                            (8, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 230, 230), 1)
+                writer.submit(canvas, {**frame_info, "console_offset": console_offset,
+                    "console_capture_monotonic_ns": console_captured_ns, "composed_monotonic_ns": composed_ns})
         receive_stop.set()
         if receiver is not None:
             receiver.join(timeout=2)
