@@ -1,5 +1,5 @@
 diff --git a/tests/test_aerialvln_evaluation.py b/tests/test_aerialvln_evaluation.py
-index 3f75fe5..705f255 100644
+index 3f75fe5..259ec07 100644
 --- a/tests/test_aerialvln_evaluation.py
 +++ b/tests/test_aerialvln_evaluation.py
 @@ -84,8 +84,8 @@ class MetricTests(unittest.TestCase):
@@ -54,7 +54,7 @@ index 3f75fe5..705f255 100644
 +                result_file = root / "runtime_result.json"
 +
 +                def finish_runtime():
-+                    result_file.write_text(json.dumps({"session_id": "session_new",
++                    result_file.write_text(json.dumps({"session_id": "new",
 +                        "status": "completed" if completed else "incomplete",
 +                        "end_reason": "runtime_completed" if completed else "runtime_stopped"}))
 +
@@ -141,7 +141,7 @@ index 3f75fe5..705f255 100644
          with tempfile.TemporaryDirectory() as temp_dir:
              root = Path(temp_dir)
 diff --git a/tools/aerialvln_evaluation.py b/tools/aerialvln_evaluation.py
-index fdd9a6a..f4e6eca 100644
+index fdd9a6a..ba6a6c3 100644
 --- a/tools/aerialvln_evaluation.py
 +++ b/tools/aerialvln_evaluation.py
 @@ -17,7 +17,7 @@ from tools.aerialvln_case import load_raw_episodes
@@ -281,15 +281,16 @@ index fdd9a6a..f4e6eca 100644
                  try:
                      state.add_pose(read_absolute_position(client, vehicle_name))
                      consecutive_pose_failures = 0
-@@ -378,6 +410,22 @@ def monitor_evaluation(
+@@ -378,6 +410,23 @@ def monitor_evaluation(
                  end_reason = "successful_land"
                  break
 
 +            # 单任务入口返回或调度器终止时立即结算，不等待下一次人工输入。
 +            if agent_result_path is not None and agent_result_path.is_file():
 +                result = json.loads(agent_result_path.read_text(encoding="utf-8"))
-+                if result.get("session_id") is not None and (
-+                        session_path is None or result["session_id"] != session_path.name):
++                # harness 保存裸编号，目录名称额外带 session_ 前缀。
++                if result.get("session_id") is not None and session_path is not None and result["session_id"] not in {
++                        session_path.name, session_path.name[len("session_"):]}:
 +                    raise ValueError("runtime result session does not match evaluation")
 +                end_reason = result.get("end_reason", "runtime_stopped")
 +                if result.get("status") == "completed" and end_reason == "runtime_completed":
