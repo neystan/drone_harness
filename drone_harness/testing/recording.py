@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fps", type=float, default=20)
     parser.add_argument("--preview-fps", type=float, default=20)
     parser.add_argument("--width", type=int, default=640)
-    parser.add_argument("--bitrate-kbps", type=int, default=500)
+    parser.add_argument("--bitrate-kbps", type=int, default=1000)
     parser.add_argument("--max-mb", type=int, default=512)
     parser.add_argument("--min-free-gb", type=float, default=5)
     parser.add_argument("--preview", action="store_true")
