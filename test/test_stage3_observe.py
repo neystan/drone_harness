@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 import drone_harness.runtime.agent_loop as loop_module
 from drone_harness.runtime.agent_loop import agent_loop
 from drone_harness.tools import flight
@@ -30,6 +32,29 @@ def fresh_snapshot(after_stamp_ns: int, distance_m: float = 4.0):
     return replace(source, observation_id=f"rgb-{stamp_ns}", rgb_stamp_ns=stamp_ns,
                    depth_stamp_ns=stamp_ns,
                    intrinsics=replace(source.intrinsics, stamp_ns=stamp_ns))
+
+
+@pytest.mark.parametrize("safe_limit,expected", [(0.0, 0.0), (0.001705, 0.0),
+                                                 (0.099, 0.0), (0.1, 0.1), (0.5, 0.5)])
+def test_sim_forward_ignores_subminimum_motion(tmp_path, monkeypatch, safe_limit, expected):
+    """毫米级净空不发布目标，达到最小步长后仍按原安全上限执行。"""
+    controller = SimpleNamespace(vehicle_status=SimpleNamespace(mode="OFFBOARD", connected=True, armed=True),
+                                 flight_state=lambda: "IN_AIR")
+    context = context_for(tmp_path, controller)
+    rules = SimpleNamespace(depth_valid=True, forward_max_m=safe_limit, reason="OK",
+                            front_clearance_m=safe_limit, front_obstacle_m=1.0 + safe_limit,
+                            observation_id="test")
+    monkeypatch.setattr(flight, "_sim_forward_rules", lambda _context: rules)
+    move = Mock(return_value={"success": True})
+    monkeypatch.setattr(flight, "move", move)
+    result = flight.forward(context, 3.0)
+    assert result["success"] and result["commanded_distance_m"] == expected
+    assert result["forward_max_m"] == safe_limit
+    assert result["motion_executed"] is (expected > 0)
+    if expected:
+        assert move.call_args.args[1] == expected
+    else:
+        move.assert_not_called()
 
 
 def test_first_model_request_is_text_only_then_observe_feeds_same_model(tmp_path: Path) -> None:

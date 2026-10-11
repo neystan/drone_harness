@@ -15,6 +15,7 @@ from drone_harness.vision.depth_rules import compute_depth_rules, invalid_depth_
 WAIT_FOR_POSITION_TIMEOUT_S = 3.0
 LAND_TIMEOUT_S = 45.0
 COMMAND_ACK_TIMEOUT_S = 2.0
+MIN_SIM_FORWARD_M = 0.1
 
 
 def _flight_state(controller: Any) -> str | None:
@@ -708,6 +709,9 @@ def forward(context: Any, distance_m: Any) -> dict[str, Any]:
     if not is_finite_number(rules.forward_max_m) or rules.forward_max_m < 0:
         rules = invalid_depth_rules(rules.observation_id, "FORWARD_DEPTH_LIMIT_INVALID")
     commanded = min(requested, context.profile.forward_step_limit_m, rules.forward_max_m) if rules.depth_valid else 0.0
+    too_small = context.profile.mode == "simulation" and 0 < commanded < MIN_SIM_FORWARD_M
+    if too_small:
+        commanded = 0.0
     feedback = {
         "requested_distance_m": requested,
         "commanded_distance_m": commanded,
@@ -720,7 +724,9 @@ def forward(context: Any, distance_m: Any) -> dict[str, Any]:
         "clamped": commanded < requested,
     }
     if commanded <= 0:
-        if not rules.depth_valid:
+        if too_small:
+            reason = f"可执行距离不足 {MIN_SIM_FORWARD_M:g} 米最小有效步长"
+        elif not rules.depth_valid:
             reason = f"深度无效（{rules.reason}），前方距离未知"
         elif rules.front_obstacle_m is not None:
             reason = f"前方约 {rules.front_obstacle_m:.2f} 米有障碍物，需保留约 1 米计划净空"
