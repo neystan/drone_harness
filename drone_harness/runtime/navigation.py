@@ -86,9 +86,14 @@ def parse_navigation_plan(value: Any, original_instruction: str,
     required = fields - {"evidence"}
     previous_evidence = {goal.id: goal.evidence for goal in previous.subgoals} if previous else {}
     parsed = []
-    for goal in goals:
-        if not isinstance(goal, dict) or not required <= set(goal) <= fields:
-            raise ValueError("子目标必须包含 id、description、completion_condition、status，evidence 可省略")
+    for index, goal in enumerate(goals, start=1):
+        if not isinstance(goal, dict):
+            raise ValueError(f"第 {index} 个子目标必须为对象")
+        missing, extra = required - set(goal), set(goal) - fields
+        if missing or extra:
+            detail = (f"缺少字段：{', '.join(sorted(missing))}" if missing else
+                      f"包含未知字段：{', '.join(sorted(extra))}")
+            raise ValueError(f"第 {index} 个子目标（id={goal.get('id', '未提供')}）{detail}；请修正该条目后重新提交完整清单")
         goal = {**goal, "evidence": goal.get("evidence", previous_evidence.get(str(goal["id"]).strip(), ""))}
         if any(not isinstance(goal[key], str) for key in fields):
             raise ValueError("子目标字段必须为文字")

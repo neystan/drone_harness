@@ -137,3 +137,20 @@ def test_optional_evidence_defaults_preserves_and_can_be_cleared(tmp_path):
     payload["subgoals"][1]["evidence"] = ""
     assert update_navigation_plan(context, payload)["success"]
     assert context.navigation_plan.subgoals[1].evidence == ""
+
+
+def test_missing_required_field_identifies_subgoal_for_model_correction(tmp_path):
+    """复现真实模型漏填末项描述，反馈明确指出条目和字段，旧清单不变。"""
+    context = context_for(tmp_path)
+    context.navigation_enabled = True
+    context.navigation_instruction = "去路口再去红门"
+    payload = plan_payload()
+    assert update_navigation_plan(context, payload)["success"]
+    old = context.navigation_plan
+    payload["subgoals"][1].pop("description")
+    result = update_navigation_plan(context, payload)
+    assert not result["success"] and context.navigation_plan is old
+    assert "第 2 个子目标" in result["message"] and "id=g2" in result["message"]
+    assert "缺少字段：description" in result["message"]
+    payload["subgoals"][1]["description"] = "到红门前"
+    assert update_navigation_plan(context, payload)["success"]
