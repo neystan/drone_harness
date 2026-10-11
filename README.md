@@ -52,7 +52,7 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q
 
 未完成任务收到“继续”“降低一点”等引导时保留原指令、完整计划和文字历史，清除旧图片、深度及审批状态；不再额外追加重复的跨轮进度摘要，无位移计数不重置。下一轮不会重放中断动作。完成、实际降落结束或安全交接后的任务不自动续接。明确取消可输入 `取消任务`、`取消当前任务`、`停止任务`、`停止当前任务`、`停止` 或 `停下`；明确替换用 `新任务：…` 或 `换个任务：…`（也接受英文冒号）。这些是有限的明确表达，不做额外模型分类；其他复杂说法由原 VLM 理解，不承诺程序识别。明确取消/替换会隔离旧任务文字，取消本身不请求模型且先复用原安全悬停流程。
 
-终端显示完整清单、完成依据与更新原因；`navigation_plan.jsonl` 记录 `created / updated / resumed / completed / incomplete / cancelled` 快照，原 `tool_calls.jsonl`、`observations.jsonl` 继续保留。多工具整体拒绝逐条记录参数、原因与未执行标记。异常或提前降落不能冒充导航完成。
+终端显示完整清单、完成依据与更新原因；`evidence` 可省略，新目标默认为空，已有目标按 ID 保留原依据，显式空串可清除。`navigation_plan.jsonl` 记录 `created / updated / resumed / completed / incomplete / cancelled` 快照，原 `tool_calls.jsonl`、`observations.jsonl` 继续保留。多工具整体拒绝逐条记录参数、原因与未执行标记。异常或提前降落不能冒充导航完成。
 
 在使用的 sim/real profile 的 `storage` 下设置 `save_observation_images: true`，重启后启用图片归档（默认 `false`）。图片保存在 `storage.log_dir/session_时间/observations/*.jpg`，`observations.jsonl` 的 `image_path` 为会话内相对路径，可通过观测编号和时间与工具记录关联。保存的是 `observe` 实际提供给 VLM 的 JPEG，不另取图、不保存前进内部取到但未交给模型的图片，不把 base64 写入 JSONL。保存失败给出警告，不改动作结果；不会自动删除旧图片，需留意磁盘容量。
 

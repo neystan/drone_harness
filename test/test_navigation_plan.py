@@ -116,3 +116,24 @@ def test_plan_schema_and_snapshot_do_not_need_finish_action():
     plan = parse_navigation_plan(plan_payload(statuses=("completed", "completed")), "原文")
     plan.finish(completed=False, reason="降落失败")
     assert plan.status == "incomplete"
+
+
+def test_optional_evidence_defaults_preserves_and_can_be_cleared(tmp_path):
+    """漏填依据不再拒绝清单，已有依据按目标 ID 保留，显式空串可清除。"""
+    context = context_for(tmp_path)
+    context.navigation_enabled = True
+    context.navigation_instruction = "到红门"
+    payload = plan_payload()
+    payload["subgoals"][0].pop("evidence")
+    assert update_navigation_plan(context, payload)["success"]
+    assert context.navigation_plan.subgoals[0].evidence == ""
+    payload["subgoals"][0].update(status="completed", evidence="侧向观察确认进入路口")
+    assert update_navigation_plan(context, payload)["success"]
+    payload["subgoals"][0].pop("evidence")
+    payload["subgoals"].reverse()
+    assert update_navigation_plan(context, payload)["success"]
+    assert context.navigation_plan.subgoals[1].evidence == "侧向观察确认进入路口"
+    assert "evidence" not in payload["subgoals"][1]
+    payload["subgoals"][1]["evidence"] = ""
+    assert update_navigation_plan(context, payload)["success"]
+    assert context.navigation_plan.subgoals[1].evidence == ""

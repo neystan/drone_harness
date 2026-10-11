@@ -72,7 +72,8 @@ class NavigationPlan:
         return f"导航进度：{self.completed_count}/{len(self.subgoals)} 段由模型确认；已确认：{completed}。"
 
 
-def parse_navigation_plan(value: Any, original_instruction: str) -> NavigationPlan:
+def parse_navigation_plan(value: Any, original_instruction: str,
+                          previous: NavigationPlan | None = None) -> NavigationPlan:
     """只校验完整清单的结构，不冻结目标或检查语义完成。"""
     if not isinstance(value, dict) or set(value) != {"subgoals", "reason"}:
         raise ValueError("参数必须且只能包含 subgoals、reason")
@@ -82,10 +83,13 @@ def parse_navigation_plan(value: Any, original_instruction: str) -> NavigationPl
     if not isinstance(goals, list) or not goals:
         raise ValueError("subgoals 必须为非空列表")
     fields = {"id", "description", "completion_condition", "status", "evidence"}
+    required = fields - {"evidence"}
+    previous_evidence = {goal.id: goal.evidence for goal in previous.subgoals} if previous else {}
     parsed = []
     for goal in goals:
-        if not isinstance(goal, dict) or set(goal) != fields:
-            raise ValueError("子目标字段必须为 id、description、completion_condition、status、evidence")
+        if not isinstance(goal, dict) or not required <= set(goal) <= fields:
+            raise ValueError("子目标必须包含 id、description、completion_condition、status，evidence 可省略")
+        goal = {**goal, "evidence": goal.get("evidence", previous_evidence.get(str(goal["id"]).strip(), ""))}
         if any(not isinstance(goal[key], str) for key in fields):
             raise ValueError("子目标字段必须为文字")
         if any(not goal[key].strip() for key in ("id", "description", "completion_condition")):
@@ -116,7 +120,7 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
         return {"success": False, "error": "NAVIGATION_DISABLED", "plan_changed": False}
     old = context.navigation_plan
     try:
-        plan = parse_navigation_plan(arguments, old.original_instruction if old else context.navigation_instruction)
+        plan = parse_navigation_plan(arguments, old.original_instruction if old else context.navigation_instruction, old)
     except ValueError as exc:
         return {"success": False, "error": "INVALID_NAVIGATION_PLAN", "message": str(exc), "plan_changed": False}
     changed = old is None or (old.subgoals, old.reason) != (plan.subgoals, plan.reason)

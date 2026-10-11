@@ -159,13 +159,13 @@ NAVIGATION_PLAN_TOOL_SCHEMA = {
             "properties": {
                 "subgoals": {"type": "array", "minItems": 1, "items": {
                     "type": "object", "additionalProperties": False,
-                    "required": ["id", "description", "completion_condition", "status", "evidence"],
+                    "required": ["id", "description", "completion_condition", "status"],
                     "properties": {
                         "id": {"type": "string", "minLength": 1},
                         "description": {"type": "string", "minLength": 1},
                         "completion_condition": {"type": "string", "minLength": 1},
                         "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
-                        "evidence": {"type": "string", "description": "简短完成依据；未完成时通常为空。"},
+                        "evidence": {"type": "string", "description": "简短完成依据；可省略，已有目标沿用原依据，新目标为空。"},
                     },
                 }},
                 "reason": {"type": "string", "minLength": 1},
