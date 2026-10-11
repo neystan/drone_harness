@@ -152,7 +152,8 @@ NAVIGATION_PLAN_TOOL_SCHEMA = {
     "function": {
         "name": "update_navigation_plan",
         "description": "创建或替换本轮完整导航清单；包含所有仍需保留的条目，同一目标沿用 ID。"
-                       "通常只将当前项设为 in_progress，仅在计划或进度变化时调用。",
+                       "通常只将当前项设为 in_progress，仅在计划或进度变化时调用。"
+                       "降落只作清单完成后的收尾，不写入条目或完成条件。",
         "parameters": {
             "type": "object", "additionalProperties": False,
             "required": ["subgoals", "reason"],
@@ -180,6 +181,9 @@ def get_tool_schemas(profile: RuntimeProfile | None = None, *, navigation_enable
     schemas = deepcopy(TOOL_SCHEMAS)
     if navigation_enabled:
         schemas.append(deepcopy(NAVIGATION_PLAN_TOOL_SCHEMA))
+        next(item["function"] for item in schemas if item["function"]["name"] == "land")["description"] = (
+            "在当前位置降落，成功立即结束本轮。导航任务先更新清单确认全部导航子目标完成，再调用本工具。"
+        )
     if profile is None:
         return schemas
     functions = {item["function"]["name"]: item["function"] for item in schemas}

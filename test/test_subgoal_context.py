@@ -1,6 +1,7 @@
 """验证当前子目标完成边界与文字、单图保留。"""
 
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
@@ -8,6 +9,7 @@ from drone_harness.runtime.navigation import (
     compact_navigation_history, current_subgoal_completed, parse_navigation_plan,
 )
 from drone_harness.llm.prompts import build_system_prompt, NAVIGATION_EXECUTION_PROMPT
+from drone_harness.tools.schemas import get_tool_schemas
 from test_navigation_plan import plan_payload
 from test_navigation_loop import nav_context, assert_tool_pairs
 
@@ -68,3 +70,17 @@ def test_prompt_describes_visual_memory_without_sentence_limit(tmp_path):
     assert "一两句话" not in prompt
     assert "视觉记忆" in prompt and "不确定判断" in prompt
     assert "先使用 update_navigation_plan" in NAVIGATION_EXECUTION_PROMPT
+
+
+@pytest.mark.parametrize("mode", ["simulation", "real"])
+def test_navigation_tools_explain_landing_after_plan_completion(tmp_path, mode):
+    """导航工具说明明确降落时序，未启用清单时不改原降落说明。"""
+    profile = replace(nav_context(tmp_path).profile, mode=mode)
+    tools = {item["function"]["name"]: item["function"]
+             for item in get_tool_schemas(profile, navigation_enabled=True)}
+    assert "不写入条目或完成条件" in tools["update_navigation_plan"]["description"]
+    assert "先更新清单" in tools["land"]["description"]
+    assert "成功立即结束本轮" in tools["land"]["description"]
+    original = {item["function"]["name"]: item["function"] for item in get_tool_schemas(profile)}
+    assert original["land"]["description"] == "在当前位置降落。"
+    assert "降落不写入条目或完成条件" in NAVIGATION_EXECUTION_PROMPT
