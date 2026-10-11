@@ -2,13 +2,15 @@
 
 `drone_harness` 是基于 ROS 2、MAVROS 与 PX4 的 RGB-D 导航飞行闭环项目。它从原 `drone_agent` 工作副本受控迁移而来；原仓库保持只读。阶段 1 执行链见 [详细实施文档](docs/drone_harness-Phase1-单目标飞行闭环-详细实施文档.md)，阶段 2 任务管理见 [实施文档](docs/drone_harness-Phase2-长指令与子目标管理-实施文档.md)。
 
-> 2026-10-06：阶段 2 已改为 VLM 通过 `update_navigation_plan` 自主管理清单，取代固定拆分和完成 JSON 协议。验证记录见下文。此前悬停恢复、升降、按需观察等改造均属于项目阶段 1。新版真实模型与仿真仍待验证，不宣称导航到达或最终停距验收。只在已抽测的 scene 9、13、21、24 使用仿真深度规则；scene 7 旧起点不用于新测试。真机自主飞行不在本阶段授权内。
+> 2026-10-11：当前清单参数只有 `subgoals`、`reason`，不再使用 `finish_action`，每项 `evidence` 可省略；批测等待 runtime 正常结束后按最终水平距离评分。仿真取图使用 AirSim 同域时间，前进不足 0.1 米不发布目标；录像默认 1000 kbps，并为观看者显示场景坐标。以下当前说明优先于历史设计文档，最新验证见“本轮验收记录”。
+
+此前悬停恢复、升降、按需观察等改造均属于项目阶段 1。只在已抽测的 scene 9、13、21、24 使用仿真深度规则；scene 7 旧起点不用于新测试。真机自主飞行不在本阶段授权内，不宣称最终停距或实机安全验收。
 
 ## 包与入口
 
 仿真顺序批测入口为 `python3 scripts/run_sim_batch.py`，支持自选 case/区间、整表循环、runtime 提前退出即结算下一条、实时画面与工具叠加录像，以及逐条/每轮/全批指标汇总。使用方法、磁盘预算和验证边界以后更新在桌面 [仿真批量测试](/home/stan/桌面/仿真批量测试.md)；可先加 `--dry-run` 做只读检查。
 
-默认预览和录像均为 20 FPS；源相机停帧不伪装成新画面，实际帧龄与工具输出时间线单独保存。[五例两轮配置](config/sim_batch.simple-five.json) 保留英文导航原文并要求中文回答，每例最多 30 分钟：
+默认预览和录像均为 20 FPS，目标码率 1000 kbps；源相机停帧不伪装成新画面，实际帧龄与工具输出时间线单独保存。预览和录像的坐标栏只供人观看，不修改交给 VLM 的图片。[五例两轮配置](config/sim_batch.simple-five.json) 保留英文导航原文并要求中文回答，每例最多 30 分钟：
 
 ```bash
 python3 scripts/run_sim_batch.py --config config/sim_batch.simple-five.json --dry-run
@@ -36,6 +38,23 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q
 
 当前机器的系统 pytest 与自动加载的插件不兼容，故临时关闭插件自动加载。S1 的原样迁移基线为 27 通过、6 失败；这些失败来自旧飞行安全测试替身与现有 `flight_state()` 接口不匹配，后续安全阶段须保留等价断言并修复。
 
+## 本轮验收记录（2026-10-11）
+
+全量离线 **341 项通过**，适配仓库评分、case、目录与 launcher 专项 **34 项通过**；评分器另在实际运行的 Python 3.8 环境通过 21 项 unittest。编译、差异空白与适配补丁应用检查通过。
+
+[短测配置](config/sim_batch.acceptance.json) 使用 [自定义夹具](test/fixtures/sim_acceptance/val_unseen.json)，复用 scene 24 的原 case 351 起点。两条中文任务分别检查“不降落结束”和“旋转后降落”，每条最多 300 秒。目标是起点附近半米或原地，只验证功能，不作为正式数据集导航成绩。
+
+```bash
+/usr/bin/python3 scripts/run_sim_batch.py --config config/sim_batch.acceptance.json --dry-run
+/usr/bin/python3 scripts/run_sim_batch.py --config config/sim_batch.acceptance.json
+```
+
+实际短测中，不降落分支正常结束（NE 0.0269 米、SR=1、OSR=1、steps=2）；降落分支补充工具时序说明后独立复测正常结束（NE 0.0065 米、SR=1、OSR=1、steps=2）。后者有一轮多工具请求被原规则整体拒绝，模型自行改为单工具后继续，没有人工引导。
+
+不降落证据位于 `drone_harness_runtime/batches_acceptance/20261011-161352-171940/00001-r1-case0/`；降落复测位于 `batches_acceptance/20261011-162123-072199/00001-r1-case1/`。各自结果、日志、轨迹与录像完整保留，MP4 完整解码和叠加画面检查通过。两条来自不同批次；前一批第二条降落未先确认清单，SR=0，失败记录没有覆盖。首次联调的会话编号误判也已修复并保留旧报告。
+
+两份成功短测录像的实际预览、合成与编码均约 20 FPS，工具文字首次显示平均延迟约 52–60 ms。源相机仍有停帧，降落复测最大接收帧龄约 8 秒；20 FPS 输出不等于每秒 20 张新源图。此次没有验证完整 30 分钟、困难长导航或实机，不把这两条功能短测写成导航能力验收。完整逐条记录以后维护在桌面批测文档。
+
 ## 阶段 2：长指令与子目标管理
 
 > 2026-10-08 上下文修订：删除独立执行事实摘要，保留用户与 AI 文字；当前子目标完成才清理旧工具过程，仅改计划不清理。图片仍只保留最新一张，提示词要求充分描述导航相关信息。保留既有 few-shot、有限纠错、续接与观察图归档，不增加高度说明或改变收尾。完整边界与验证见 [阶段 2 最新实施记录](docs/drone_harness-Phase2-长指令与子目标管理-实施文档.md)。
@@ -56,7 +75,7 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q
 
 在使用的 sim/real profile 的 `storage` 下设置 `save_observation_images: true`，重启后启用图片归档（默认 `false`）。图片保存在 `storage.log_dir/session_时间/observations/*.jpg`，`observations.jsonl` 的 `image_path` 为会话内相对路径，可通过观测编号和时间与工具记录关联。保存的是 `observe` 实际提供给 VLM 的 JPEG，不另取图、不保存前进内部取到但未交给模型的图片，不把 base64 写入 JSONL。保存失败给出警告，不改动作结果；不会自动删除旧图片，需留意磁盘容量。
 
-当前方案见 [导航清单工具设计与实施方案](docs/drone_harness-Phase2-导航清单工具-设计与实施方案.md)。历史清单工具改造为专项 57 项、全量 249 项；实机同步后为 253 项。最新验证以阶段 2 实施文档顶部为准。离线测试不能证明 VLM 已能正确判断到达；本轮未启动仿真、未请求真实模型、未测试实机。
+历史方案见 [导航清单工具设计与实施方案](docs/drone_harness-Phase2-导航清单工具-设计与实施方案.md)。历史清单工具改造为专项 57 项、全量 249 项；实机同步后为 253 项，当时未启动仿真、未请求真实模型、未测试实机。最新接口与验证以本 README 和桌面批测文档的 2026-10-11 记录为准；离线通过不能证明 VLM 已能正确判断到达。
 
 ## 动作后的稳定等待
 
