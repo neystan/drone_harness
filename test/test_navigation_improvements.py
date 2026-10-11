@@ -19,12 +19,12 @@ from test_navigation_plan import plan_payload
 
 
 def test_prompt_contains_general_completion_examples(tmp_path):
-    """完成示例覆盖不同空间关系，不要求机械环视。"""
+    """模型请求包含空间关系示例与完成前左右观察要求。"""
     context = nav_context(tmp_path)
     client = RecordingClient([reply(text="收到")])
     loop.agent_loop(client, "test", messages(), context)
     prompt = client.requests[0][0]["content"]
-    assert all(word in prompt for word in ("十字路口中央", "蓝色卡车", "白色建筑", "不必固定环视"))
+    assert all(word in prompt for word in ("十字路口中央", "蓝色卡车", "白色建筑", "先向左、向右旋转并分别调用 observe"))
 
 
 @pytest.mark.parametrize("enabled", [False, True])

@@ -28,12 +28,15 @@ from test_stage3_observe import tool_call
 def test_system_prompt_focuses_on_navigation_not_tool_implementation(tmp_path):
     """系统规则只保留任务推进、观察顺序、绕障与完成后降落。"""
     prompt = build_system_prompt(context_for(tmp_path).profile)
-    for phrase in ("长导航任务飞行规划器", "旋转", "重新观察", "深度", "确定性", "上升", "下降", "land"):
+    for phrase in ("长导航任务飞行规划器", "旋转", "重新观察", "深度", "上升", "下降", "land"):
         assert phrase in prompt
     for removed in ("单目标", "候选完成", "观测号", "同号", "第二个视觉模型", "19 米", "1000", "不重复索取"):
         assert removed not in prompt
     assert "障碍" in prompt and "不默认视野外的上方或下方安全" in prompt
-    assert "深度前进上限不是目标距离" in prompt
+    assert "深度只提供障碍净空和前进上限，不代表目标距离" in prompt
+    assert "看不见目标时，除了左右旋转，也要主动考虑飞高一些" in prompt
+    assert "可调用 up 小幅分步上升" in prompt
+    assert "每次上升后调用 observe 重新寻找目标" in prompt
 
 
 @pytest.mark.parametrize("mode", ["simulation", "real"])
@@ -57,6 +60,8 @@ def test_navigation_prompt_checks_original_goal_before_finishing(tmp_path):
         [{"role": "system", "content": build_system_prompt(context_for(tmp_path).profile)}],
         None, observation_current=False)[0]["content"]
     for phrase in ("看见、接近、到达、进入、经过", "不把看见当作到达", "不只凭累计前进距离确认到达",
+                   "在深度净空允许的范围内尽可能接近原指令要求的位置", "目标边界时缩短步长",
+                   "依据不足或受阻就继续调整，保持未完成", "核实完成后才更新进度并推进下一子目标",
                    "不能通过删除原任务要求或放宽完成条件来宣告完成", "仍需观察或移动时保持目标未完成",
                    "要求降落则调用 land，否则只输出最终完成说明", "不再输出过渡性文字",
                    "降落不写入条目或完成条件", "land 成功立即结束本轮"):
@@ -64,7 +69,9 @@ def test_navigation_prompt_checks_original_goal_before_finishing(tmp_path):
     assert prompt.index("最后一项标记完成前") < prompt.index("全部导航目标确认后")
     for example in ("到达十字路口中央", "经过蓝色卡车", "到达白色建筑前停车场"):
         assert example in prompt
-    assert "不必固定环视" in prompt
+    assert "先向左、向右旋转并分别调用 observe" in prompt
+    assert "不跳到下一子目标" in prompt
+    assert "不必固定环视" not in prompt
 
 
 def test_visual_memory_keeps_detail_and_focuses_on_changes(tmp_path):
@@ -72,7 +79,7 @@ def test_visual_memory_keeps_detail_and_focuses_on_changes(tmp_path):
     prompt = build_system_prompt(context_for(tmp_path).profile)
     for phrase in ("充分描述", "目标特征", "道路与区域边界", "新增信息", "位置关系变化", "疑点的确认结果",
                    "无变化的背景不必完整重述", "区分可见事实与不确定判断",
-                   "不把最近障碍距离当作目标地标距离", "再决定后续飞行动作"):
+                   "深度只提供障碍净空和前进上限，不代表目标距离", "再决定后续飞行动作"):
         assert phrase in prompt
     assert "一两句话" not in prompt
 
