@@ -10,13 +10,13 @@ from drone_harness.tools.schemas import get_tool_schemas
 from test_agent_observation_loop import context_for
 
 
-def plan_payload(*, finish_action="land", statuses=("in_progress", "pending")):
+def plan_payload(*, statuses=("in_progress", "pending")):
     """生成完整清单参数，不依赖模型服务。"""
     return {"subgoals": [
         {"id": f"g{i + 1}", "description": title, "completion_condition": f"观察支持已{title}",
          "status": status, "evidence": ""}
         for i, (title, status) in enumerate(zip(("到路口", "到红门前"), statuses))],
-        "finish_action": finish_action, "reason": "按指令更新计划"}
+        "reason": "按指令更新计划"}
 
 
 def test_explicit_status_and_pending_focus():
@@ -31,7 +31,7 @@ def test_explicit_status_and_pending_focus():
 @pytest.mark.parametrize("change", [
     lambda p: p.update(extra=True), lambda p: p.pop("reason"),
     lambda p: p.update(reason=" "), lambda p: p.update(reason=1),
-    lambda p: p.update(finish_action=[]), lambda p: p.update(finish_action="fly"),
+    lambda p: p.update(finish_action="hold"),
     lambda p: p.update(subgoals=[]), lambda p: p.update(subgoals={}),
     lambda p: p["subgoals"][0].update(id=" "),
     lambda p: p["subgoals"][0].update(description=""),
@@ -68,7 +68,6 @@ def test_free_rewrite_reopen_delete_and_repeat(tmp_path):
     payload["subgoals"].reverse()
     payload["subgoals"].pop()
     payload["subgoals"][0].update(status="in_progress", completion_condition="更正条件")
-    payload["finish_action"] = "hold"
     result = update_navigation_plan(context, payload)
     assert result["success"] and result["status"] == "running" and not result["compact_history"]
     assert context.navigation_plan.original_instruction == "原始要求"
@@ -106,6 +105,14 @@ def test_finish_needs_both_complete_list_and_execution():
     plan = parse_navigation_plan(plan_payload(), "原文")
     plan.finish(completed=True, reason="提前降落")
     assert plan.status == "incomplete"
+
+
+def test_plan_schema_and_snapshot_do_not_need_finish_action():
+    """清单只保存目标，收尾选择留给模型的下一轮回复。"""
+    schema = get_tool_schemas(navigation_enabled=True)[-1]["function"]["parameters"]
+    assert set(schema["properties"]) == {"subgoals", "reason"}
+    plan = parse_navigation_plan(plan_payload(statuses=("completed", "completed")), "到目标附近")
+    assert plan.status == "finishing" and "finish_action" not in plan.snapshot()
     plan = parse_navigation_plan(plan_payload(statuses=("completed", "completed")), "原文")
     plan.finish(completed=False, reason="降落失败")
     assert plan.status == "incomplete"

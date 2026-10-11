@@ -152,11 +152,10 @@ NAVIGATION_PLAN_TOOL_SCHEMA = {
     "function": {
         "name": "update_navigation_plan",
         "description": "创建或替换本轮完整导航清单；包含所有仍需保留的条目，同一目标沿用 ID。"
-                       "通常只将当前项设为 in_progress，仅在计划或进度变化时调用。"
-                       "finish_action 默认 land，用户要求保持空中时使用 hold。",
+                       "通常只将当前项设为 in_progress，仅在计划或进度变化时调用。",
         "parameters": {
             "type": "object", "additionalProperties": False,
-            "required": ["subgoals", "finish_action", "reason"],
+            "required": ["subgoals", "reason"],
             "properties": {
                 "subgoals": {"type": "array", "minItems": 1, "items": {
                     "type": "object", "additionalProperties": False,
@@ -169,7 +168,6 @@ NAVIGATION_PLAN_TOOL_SCHEMA = {
                         "evidence": {"type": "string", "description": "简短完成依据；未完成时通常为空。"},
                     },
                 }},
-                "finish_action": {"type": "string", "enum": ["land", "hold"]},
                 "reason": {"type": "string", "minLength": 1},
             },
         },

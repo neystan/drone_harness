@@ -101,7 +101,10 @@ def agent_loop(
 
         if not tool_calls:
             if plan is not None:
-                plan.feedback = "任务尚未结束，请继续执行当前段。" if plan.current is not None else "所有导航段已确认，请调用 land 完成收尾。"
+                if plan.status == "finishing" and assistant_text.strip():
+                    return _finish_navigation_hold(context)
+                plan.feedback = ("任务尚未结束，请继续执行当前段。" if plan.current is not None else
+                                 "所有导航段已确认；用户要求降落时调用 land，否则用文字说明完成以结束本轮。")
                 continue
             _record_task_state(context, "idle")
             if context.task_state is not None and "候选完成" in assistant_text:
@@ -112,9 +115,9 @@ def agent_loop(
                 "get_state", "land", "update_navigation_plan"}:
             _skip_navigation_calls(context, messages, tool_calls, {
                 "success": True, "motion_executed": False, "error": "NAVIGATION_FINISHING",
-                "message": "导航段全部确认，只需查询状态或执行降落收尾。",
+                "message": "导航段全部确认，请按原指令降落或用文字结束；需要继续导航时先更正清单。",
             })
-            plan.feedback = "请查询状态、降落收尾，或通过计划工具纠正清单。"
+            plan.feedback = "请按原指令降落或用文字结束，或通过计划工具纠正清单。"
             continue
 
         call = tool_calls[0]
@@ -157,8 +160,6 @@ def agent_loop(
             if plan.status == "finishing":
                 if context.task_state is not None:
                     context.task_state.completion_candidate = plan.conversation_summary()
-                if plan.finish_action == "hold":
-                    return _finish_navigation_hold(context)
             elif context.task_state is not None:
                 context.task_state.completion_candidate = None
             continue
@@ -174,7 +175,7 @@ def agent_loop(
         if call.function.name == "land":
             context.navigation_resumable = False
             if plan is not None:
-                completed = plan.status == "finishing" and plan.finish_action == "land"
+                completed = plan.status == "finishing"
                 text = ("模型已确认全部子目标，降落完成，本轮已结束（未独立核验到达）。" if completed else
                         "降落完成，但导航子目标尚未全部确认，本轮已结束。")
                 return _stop_with_message(context, text, navigation_complete=completed)
@@ -232,7 +233,7 @@ def _finish_navigation_hold(context: ToolContext) -> str:
     mode = getattr(getattr(controller, "vehicle_status", None), "mode", None)
     if not callable(flight_state) or flight_state() != "IN_AIR" or mode not in {"OFFBOARD", "AUTO.LOITER"}:
         return _stop_with_message(context, "全部子目标已确认，但无法确认空中悬停状态，任务未完成。", safety_stop=True)
-    return _stop_with_message(context, "模型已确认全部子目标，按要求保持空中，本轮已结束（未独立核验到达）。",
+    return _stop_with_message(context, "模型已确认全部子目标，保持当前位置，本轮已结束（未独立核验到达）。",
                               safety_stop=True, navigation_complete=True)
 
 

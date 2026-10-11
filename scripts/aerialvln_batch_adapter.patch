@@ -1,17 +1,185 @@
+diff --git a/tests/test_aerialvln_evaluation.py b/tests/test_aerialvln_evaluation.py
+index 3f75fe5..705f255 100644
+--- a/tests/test_aerialvln_evaluation.py
++++ b/tests/test_aerialvln_evaluation.py
+@@ -84,8 +84,8 @@ class MetricTests(unittest.TestCase):
+         state.add_pose((19.0, 0.0, -80.0))
+         state.add_pose((25.0, 0.0, -5.0))
+
+-        incomplete = state.metrics(land_succeeded=False, steps_taken=2)
+-        complete = state.metrics(land_succeeded=True, steps_taken=2)
++        incomplete = state.metrics(completed=False, steps_taken=2)
++        complete = state.metrics(completed=True, steps_taken=2)
+
+         self.assertEqual(incomplete, {"NE": 25.0, "SR": 0, "OSR": 1, "steps_taken": 2})
+         self.assertEqual(complete, {"NE": 25.0, "SR": 0, "OSR": 1, "steps_taken": 2})
+@@ -103,6 +103,21 @@ class MetricTests(unittest.TestCase):
+
+
+ class ToolCallTests(unittest.TestCase):
++    def test_harness_motion_names_and_no_motion_results(self):
++        stats = ToolCallStats()
++        for name in ("takeoff", "forward", "up", "down", "rotate"):
++            stats.consume(_tool_event(name))
++        no_motion = _tool_event("forward")
++        no_motion["result"]["motion_executed"] = False
++        stats.consume(no_motion)
++        zero_rotation = _tool_event("rotate")
++        zero_rotation["arguments"] = {"degrees": 0}
++        stats.consume(zero_rotation)
++        for name in ("observe", "get_state", "update_navigation_plan"):
++            stats.consume(_tool_event(name))
++        self.assertEqual(stats.steps_taken, 5)
++        self.assertEqual(stats.attempted_calls, 10)
++
+     def test_counts_successful_navigation_tools_until_successful_land(self):
+         stats = ToolCallStats()
+         events = [
+@@ -238,6 +253,104 @@ class MonitorTests(unittest.TestCase):
+         _write_split(data_root, [_episode(goal=[10.0, 0.0, -3.0])])
+         return select_evaluation_target(data_root, "val_unseen", case_index=0)
+
++    def test_runtime_completion_controls_score_with_or_without_landing(self):
++        """正常非降落结束可计分，提前降落不能替代 runtime 最终状态。"""
++        for landed, completed, x in [(False, True, 9), (True, False, 9), (True, True, 9),
++                                     (False, True, 50)]:
++            with self.subTest(landed=landed, completed=completed, x=x), tempfile.TemporaryDirectory() as temp_dir:
++                root = Path(temp_dir)
++                session = root / "logs/session_new"
++                session.mkdir(parents=True)
++                records = [_tool_event("takeoff")]
++                if landed:
++                    records.append(_tool_event("land"))
++                (session / "tool_calls.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
++                result_file = root / "runtime_result.json"
++
++                def finish_runtime():
++                    result_file.write_text(json.dumps({"session_id": "session_new",
++                        "status": "completed" if completed else "incomplete",
++                        "end_reason": "runtime_completed" if completed else "runtime_stopped"}))
++
++                clock = _FakeClock(on_sleep=finish_runtime)
++                report = monitor_evaluation(_FakeAirSimClient([(x, 0, -3)]), "PX4", self._target(root),
++                    root / "evaluation.json", root / "logs", [], agent_result_path=result_file,
++                    timeout_s=5, clock=clock, sleep=clock.sleep)
++                self.assertEqual(clock.value, 0.2)
++                self.assertEqual(report["status"], "completed" if completed else "incomplete")
++                self.assertEqual(report["metrics"]["SR"], int(completed and x == 9))
++                self.assertEqual(report["diagnostics"]["land_succeeded"], landed)
++
++    def test_failed_final_pose_cannot_score_old_pose_as_success(self):
++        """最终位置读取失败时保留已有距离，但不能据此记为正常成功。"""
++        with tempfile.TemporaryDirectory() as temp_dir:
++            root = Path(temp_dir)
++            result_file = root / "runtime_result.json"
++            result_file.write_text(json.dumps({"status": "completed", "end_reason": "runtime_completed"}))
++            client = _FakeAirSimClient([(9, 0, -3)])
++            original = client.simGetObjectPose
++
++            def pose(vehicle):
++                if client.calls:
++                    raise RuntimeError("final pose unavailable")
++                return original(vehicle)
++
++            client.simGetObjectPose = pose
++            report = monitor_evaluation(client, "PX4", self._target(root), root / "evaluation.json",
++                root / "logs", [], agent_result_path=result_file, timeout_s=5)
++            self.assertEqual(report["end_reason"], "final_pose_unavailable")
++            self.assertEqual(report["metrics"]["SR"], 0)
++
++    def test_runtime_return_ends_monitor_without_waiting_for_timeout(self):
++        with tempfile.TemporaryDirectory() as temp_dir:
++            root = Path(temp_dir)
++            log_root = root / "logs"
++            session = log_root / "session_new"
++            session.mkdir(parents=True)
++            (session / "tool_calls.jsonl").write_text(json.dumps(_tool_event("forward")) + "\n")
++            result_file = root / "runtime_result.json"
++            result_file.write_text(json.dumps({"status": "incomplete", "end_reason": "runtime_stopped"}))
++            clock = _FakeClock()
++            report = monitor_evaluation(_FakeAirSimClient([(9, 0, -3)]), "PX4", self._target(root),
++                root / "evaluation.json", log_root, [], agent_result_path=result_file,
++                timeout_s=3600, clock=clock, sleep=clock.sleep)
++            self.assertEqual(clock.value, 0)
++            self.assertEqual(report["end_reason"], "runtime_stopped")
++            self.assertEqual(report["metrics"], {"NE": 1.0, "SR": 0, "OSR": 1, "steps_taken": 1})
++            checkpoint = json.loads((root / "evaluation_progress.json").read_text())
++            self.assertEqual(checkpoint["metrics"], report["metrics"])
++            trajectory = [json.loads(line) for line in (root / "trajectory.jsonl").read_text().splitlines()]
++            self.assertEqual(trajectory[-1]["position_ned"], [9, 0, -3])
++
++    def test_stop_signal_keeps_last_pose_and_actual_steps(self):
++        with tempfile.TemporaryDirectory() as temp_dir:
++            root = Path(temp_dir)
++            stop = root / "stop.json"
++            stop.write_text(json.dumps({"end_reason": "disk_low"}))
++            report = monitor_evaluation(_FakeAirSimClient([(50, 0, -3)]), "PX4", self._target(root),
++                root / "evaluation.json", root / "logs", [], stop_file=stop,
++                timeout_s=3600, sleep=lambda seconds: self.fail("不应等待"))
++            self.assertEqual(report["end_reason"], "disk_low")
++            self.assertEqual(report["metrics"]["NE"], 40)
++            self.assertEqual(report["metrics"]["SR"], 0)
++
++    def test_timeout_reason_wins_over_runtime_interruption_during_cleanup(self):
++        with tempfile.TemporaryDirectory() as temp_dir:
++            root = Path(temp_dir)
++            stop = root / "stop.json"
++            stop.write_text(json.dumps({"end_reason": "case_timeout"}))
++            runtime_result = root / "runtime_result.json"
++            runtime_result.write_text(json.dumps({"end_reason": "runtime_interrupted"}))
++            session = root / "logs/session_new"
++            session.mkdir(parents=True)
++            (session / "tool_calls.jsonl").write_text(json.dumps(_tool_event("land")) + "\n")
++            report = monitor_evaluation(_FakeAirSimClient([(9, 0, -3)]), "PX4", self._target(root),
++                root / "evaluation.json", root / "logs", [], stop_file=stop, agent_result_path=runtime_result,
++                timeout_s=3600, sleep=lambda seconds: self.fail("不应等待"))
++            self.assertEqual(report["end_reason"], "case_timeout")
++            self.assertEqual(report["metrics"]["SR"], 0)
++            self.assertEqual(report["metrics"]["OSR"], 1)
++
+     def test_monitor_binds_new_session_and_finishes_on_successful_land(self):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             root = Path(temp_dir)
 diff --git a/tools/aerialvln_evaluation.py b/tools/aerialvln_evaluation.py
-index fdd9a6a..9e7f39c 100644
+index fdd9a6a..f4e6eca 100644
 --- a/tools/aerialvln_evaluation.py
 +++ b/tools/aerialvln_evaluation.py
 @@ -17,7 +17,7 @@ from tools.aerialvln_case import load_raw_episodes
- 
+
  SUCCESS_DISTANCE_M = 20.0
  DEFAULT_AGENT_LOG_ROOT = Path("/home/stan/AirVLN/drone_agent_runtime/logs/sim")
 -COUNTED_STEP_TOOLS = frozenset({"takeoff", "move", "rotate", "return_home"})
 +COUNTED_STEP_TOOLS = frozenset({"takeoff", "move", "forward", "up", "down", "rotate", "return_home"})
- 
- 
+
+
  class AmbiguousAgentSessionError(RuntimeError):
-@@ -160,11 +160,14 @@ class ToolCallStats:
+@@ -128,7 +128,7 @@ class EvaluationState:
+         if self.minimum_distance_m is None or distance < self.minimum_distance_m:
+             self.minimum_distance_m = distance
+
+-    def metrics(self, land_succeeded: bool, steps_taken: int) -> dict[str, Any]:
++    def metrics(self, completed: bool, steps_taken: int) -> dict[str, Any]:
+         ne = (
+             horizontal_distance(self.last_position_ned, self.goal_position_ned)
+             if self.last_position_ned is not None
+@@ -136,7 +136,7 @@ class EvaluationState:
+         )
+         return {
+             "NE": ne,
+-            "SR": int(bool(land_succeeded) and ne is not None and ne <= SUCCESS_DISTANCE_M),
++            "SR": int(bool(completed) and ne is not None and ne <= SUCCESS_DISTANCE_M),
+             "OSR": int(
+                 self.minimum_distance_m is not None
+                 and self.minimum_distance_m <= SUCCESS_DISTANCE_M
+@@ -154,17 +154,21 @@ class ToolCallStats:
+     failed_calls: int = 0
+     steps_taken: int = 0
+     land_succeeded: bool = False
++    stop_on_land: bool = True
+
+     def consume(self, event: dict[str, Any]) -> None:
+-        if self.land_succeeded or event.get("event_type") != "tool_call":
++        if (self.stop_on_land and self.land_succeeded) or event.get("event_type") != "tool_call":
              return
          tool_name = event.get("tool_name")
          result = event.get("result")
@@ -27,15 +195,26 @@ index fdd9a6a..9e7f39c 100644
                  self.steps_taken += 1
              if tool_name == "land":
                  self.land_succeeded = True
-@@ -256,6 +259,7 @@ def build_report(
+@@ -243,7 +247,7 @@ def build_report(
+     error_message: str | None = None,
+ ) -> dict[str, Any]:
+     """Build the stable evaluation report document."""
+-    completed = status == "completed" and tool_stats.land_succeeded
++    completed = status == "completed"
+     return {
+         "schema_version": 1,
+         "status": status,
+@@ -256,6 +260,9 @@ def build_report(
          "metrics": state.metrics(completed, tool_stats.steps_taken),
          "diagnostics": {
              "success_distance_m": SUCCESS_DISTANCE_M,
++            "success_definition": "normal_completion_and_horizontal_NE_le_20m_v3",
++            "land_succeeded": tool_stats.land_succeeded,
 +            "steps_definition": "successful_motion_tools_v2: takeoff/move/forward/up/down/rotate/return_home; exclude explicit no-motion and zero rotation",
              "sample_interval_s": state.sample_interval_s,
              "minimum_distance_m": state.minimum_distance_m,
              "pose_sample_count": state.sample_count,
-@@ -314,6 +318,8 @@ def monitor_evaluation(
+@@ -314,6 +321,8 @@ def monitor_evaluation(
      sample_interval_s: float = 0.2,
      timeout_s: float = 3600.0,
      max_consecutive_pose_failures: int = 5,
@@ -44,7 +223,16 @@ index fdd9a6a..9e7f39c 100644
      clock: Callable[[], float] = time.monotonic,
      sleep: Callable[[float], None] = time.sleep,
      utc_now: Callable[[], str] = _utc_now,
-@@ -338,11 +344,18 @@ def monitor_evaluation(
+@@ -328,7 +337,7 @@ def monitor_evaluation(
+
+     baseline = frozenset(baseline_sessions)
+     state = EvaluationState(target.goal_position_ned, sample_interval_s)
+-    tool_stats = ToolCallStats()
++    tool_stats = ToolCallStats(stop_on_land=agent_result_path is None)
+     session_path = None
+     log_tail = None
+     pose_rpc_failures = 0
+@@ -338,11 +347,18 @@ def monitor_evaluation(
      status = "incomplete"
      end_reason = "evaluation_timeout"
      error_message = None
@@ -52,7 +240,7 @@ index fdd9a6a..9e7f39c 100644
 +    trajectory_path = output_path.with_name("trajectory.jsonl")
 +    output_path.parent.mkdir(parents=True, exist_ok=True)
 +    next_checkpoint = clock()
- 
+
      try:
          while True:
              try:
@@ -64,10 +252,15 @@ index fdd9a6a..9e7f39c 100644
                  consecutive_pose_failures = 0
              except Exception:
                  pose_rpc_failures += 1
-@@ -367,6 +380,21 @@ def monitor_evaluation(
-                     if tool_stats.land_succeeded:
+@@ -364,10 +380,26 @@ def monitor_evaluation(
+             if log_tail is not None:
+                 for event in log_tail.read_new():
+                     tool_stats.consume(event)
+-                    if tool_stats.land_succeeded:
++                    if tool_stats.land_succeeded and agent_result_path is None:
                          break
- 
+
+-            if tool_stats.land_succeeded:
 +            # 定期落盘，使评分器异常退出时仍可恢复最后一次已保存的指标。
 +            if clock() >= next_checkpoint:
 +                write_evaluation_report(checkpoint_path, build_report(
@@ -83,17 +276,29 @@ index fdd9a6a..9e7f39c 100644
 +                end_reason = result.get("end_reason", "batch_stopped_case")
 +                break
 +
-             if tool_stats.land_succeeded:
++            # 批测必须等 runtime 最终结果，不能用提前降落替代导航完成。
++            if agent_result_path is None and tool_stats.land_succeeded:
                  try:
                      state.add_pose(read_absolute_position(client, vehicle_name))
-@@ -378,6 +406,12 @@ def monitor_evaluation(
+                     consecutive_pose_failures = 0
+@@ -378,6 +410,22 @@ def monitor_evaluation(
                  end_reason = "successful_land"
                  break
- 
+
 +            # 单任务入口返回或调度器终止时立即结算，不等待下一次人工输入。
 +            if agent_result_path is not None and agent_result_path.is_file():
 +                result = json.loads(agent_result_path.read_text(encoding="utf-8"))
++                if result.get("session_id") is not None and (
++                        session_path is None or result["session_id"] != session_path.name):
++                    raise ValueError("runtime result session does not match evaluation")
 +                end_reason = result.get("end_reason", "runtime_stopped")
++                if result.get("status") == "completed" and end_reason == "runtime_completed":
++                    try:
++                        state.add_pose(read_absolute_position(client, vehicle_name))
++                        status = "completed"
++                    except Exception:
++                        pose_rpc_failures += 1
++                        end_reason = "final_pose_unavailable"
 +                break
 +
              if clock() >= deadline:
@@ -110,11 +315,11 @@ index 39c8cc6..f7815f3 100644
 +    parser.add_argument("--agent-result-file", type=Path, help="单任务 runtime 结束结果")
 +    parser.add_argument("--stop-file", type=Path, help="批测调度器的本条终止信号")
      return parser
- 
- 
+
+
 @@ -234,15 +236,24 @@ def capture_scene_image(client: Any, vehicle_name: str, camera_name: str) -> dic
- 
- 
+
+
  def _terminate(process: subprocess.Popen[Any], log_file: Any) -> None:
 -    if process.poll() is None:
 -        try:
@@ -143,8 +348,8 @@ index 39c8cc6..f7815f3 100644
 +        process.wait(timeout=1)
 +    finally:
 +        log_file.close()
- 
- 
+
+
  def main(argv: list[str] | None = None) -> int:
 @@ -250,6 +261,13 @@ def main(argv: list[str] | None = None) -> int:
      run_dir: Path | None = None
@@ -184,6 +389,6 @@ index 39c8cc6..f7815f3 100644
 +        finally:
 +            signal.signal(signal.SIGTERM, previous_sigterm)
 +            signal.signal(signal.SIGINT, previous_sigint)
- 
- 
+
+
  if __name__ == "__main__":

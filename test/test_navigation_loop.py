@@ -37,9 +37,9 @@ def reply(name=None, args=None, text="", call_id="call-1"):
     return SimpleNamespace(content=text, tool_calls=[tool_call(name, args or {}, call_id)] if name else [])
 
 
-def planning_reply(statuses=("in_progress", "pending"), finish_action="land"):
+def planning_reply(statuses=("in_progress", "pending")):
     """模型通过工具提交完整计划。"""
-    return reply("update_navigation_plan", plan_payload(statuses=statuses, finish_action=finish_action))
+    return reply("update_navigation_plan", plan_payload(statuses=statuses))
 
 
 def nav_context(tmp_path):
@@ -127,10 +127,10 @@ def test_invalid_plan_can_be_corrected_without_motion(tmp_path, raw):
     context = nav_context(tmp_path)
     bad = planning_reply()
     bad.tool_calls[0].function.arguments = raw
-    client = RecordingClient([planning_reply(), bad, planning_reply(("completed", "completed"), "hold")])
+    client = RecordingClient([planning_reply(), bad, planning_reply(("completed", "completed")), reply(text="完成")])
     loop_module.agent_loop(client, "vlm", messages(), context)
     assert context.navigation_plan.status == "completed"
-    assert len(client.requests) == 3
+    assert len(client.requests) == 4
     assert '"success": false' in client.requests[2][-1]["content"]
     assert '"completed_count": 0' in client.requests[2][0]["content"]
 
@@ -152,7 +152,7 @@ def test_completion_without_fresh_observation_does_not_block_plan(tmp_path, monk
     monkeypatch.setattr(flight, "rotate", Mock(return_value={"success": True, "degrees": 15}))
     client = RecordingClient([planning_reply(), observe_reply(),
                               reply("rotate", {"direction": "left", "degrees": 15}),
-                              planning_reply(("completed", "completed"), "hold")])
+                              planning_reply(("completed", "completed")), reply(text="完成")])
     loop_module.agent_loop(client, "vlm", messages(), context)
     assert '"observation_current": false' in client.requests[-1][0]["content"]
     assert context.observation is None and context.navigation_plan.status == "completed"
@@ -166,7 +166,7 @@ def test_updates_preserve_observation_counter_and_do_not_wait(tmp_path, monkeypa
     wait = Mock(side_effect=AssertionError("清单不应等待"))
     monkeypatch.setattr(loop_module.time, "sleep", wait)
     client = RecordingClient([observe_reply(), planning_reply(), planning_reply(),
-                              planning_reply(("completed", "completed"), "hold")])
+                              planning_reply(("completed", "completed")), reply(text="完成")])
     loop_module.agent_loop(client, "vlm", messages(), context)
     assert context.observation is not None and context.task_state.consecutive_no_progress == 2
     assert len(events(tmp_path)) == 3
@@ -208,7 +208,7 @@ def test_hold_preserves_hover_handoff(tmp_path, monkeypatch, hover_fails):
     hover = Mock(side_effect=SafetyHandoffRequired("失败") if hover_fails else None,
                  return_value={"safety_state": "HOLD_CONFIRMED"})
     monkeypatch.setattr(loop_module, "request_confirmed_hover", hover)
-    client = RecordingClient([planning_reply(("completed", "completed"), "hold")])
+    client = RecordingClient([planning_reply(("completed", "completed")), reply(text="已到达附近")])
     if hover_fails:
         with pytest.raises(SafetyHandoffRequired):
             loop_module.agent_loop(client, "vlm", messages(), context)
@@ -226,7 +226,7 @@ def test_hold_requires_airborne_control(tmp_path, state, mode):
     context = nav_context(tmp_path)
     context.controller.flight_state = lambda: state
     context.controller.vehicle_status.mode = mode
-    client = RecordingClient([planning_reply(("completed", "completed"), "hold")])
+    client = RecordingClient([planning_reply(("completed", "completed")), reply(text="完成")])
     assert "无法确认" in loop_module.agent_loop(client, "vlm", messages(), context)
     assert context.navigation_plan.status == "incomplete"
 
@@ -280,9 +280,9 @@ def test_next_user_turn_keeps_text_but_clears_plan(tmp_path):
     inputs = iter(["去路口后悬停", "说明刚才", "exit"])
     context.message_bus = SimpleNamespace(consume_user_message=lambda: SimpleNamespace(content=next(inputs)),
                                           has_pending_user_message=lambda: False)
-    finish = planning_reply(("completed", "completed"), "hold")
+    finish = planning_reply(("completed", "completed"))
     finish.content = "路口两侧道路清晰"
-    client = RecordingClient([observe_reply(), finish, reply(text="上轮是模型完成判断")])
+    client = RecordingClient([observe_reply(), finish, reply(text="已到达路口"), reply(text="上轮是模型完成判断")])
     _run_interactive_loop(client, "vlm", context, loop_module.agent_loop, input_terminal_started=True)
     assert "路口两侧道路清晰" in str(client.requests[-1])
     assert "导航进度：" not in str(client.requests[-1])
@@ -376,10 +376,10 @@ def test_runtime_wires_phase2_for_both_profiles(tmp_path, monkeypatch, mode, ena
 def test_plan_update_with_natural_language_never_parses_text_json(tmp_path):
     """复现自然描述加 JSON 的回复，状态仅由工具参数决定。"""
     context = nav_context(tmp_path)
-    response = planning_reply(("completed", "completed"), "hold")
+    response = planning_reply(("completed", "completed"))
     response.content = '当前画面有路灯。\n{"subgoal_complete": true}'
-    client = RecordingClient([response])
-    assert "保持空中" in loop_module.agent_loop(client, "vlm", messages(), context)
+    client = RecordingClient([response, reply(text="完成")])
+    assert "保持当前位置" in loop_module.agent_loop(client, "vlm", messages(), context)
     assert context.navigation_plan.status == "completed"
 
 

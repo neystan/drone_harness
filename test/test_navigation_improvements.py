@@ -103,7 +103,7 @@ def test_guidance_resumes_plan_without_fact_summary_or_images(tmp_path, monkeypa
 
     monkeypatch.setattr(loop, "dispatch_tool_call", dispatch)
     client = RecordingClient([planning_reply(), observe_reply(), reply("forward", {"distance_m": 5}),
-                              planning_reply(("completed", "completed"), "hold")])
+                              planning_reply(("completed", "completed")), reply(text="完成")])
     _run_interactive_loop(client, "test", context, loop.agent_loop, input_terminal_started=True)
     request = client.requests[-1]
     assert "去路口后到红门" in request[0]["content"]
@@ -123,7 +123,7 @@ def test_completion_preserves_scene_text_not_tool_result(tmp_path, monkeypatch):
     monkeypatch.setattr(flight, "up", Mock(return_value={"success": True, "final_position_ned": [0, 0, -7]}))
     client = RecordingClient([planning_reply(), reply("up", {"distance_m": 5}, text="前方路口，右侧围栏遮挡入口"), observe_reply(),
                               planning_reply(("completed", "in_progress")),
-                              planning_reply(("completed", "completed"), "hold")])
+                              planning_reply(("completed", "completed")), reply(text="完成")])
     loop.agent_loop(client, "test", messages(), context)
     assert "[0, 0, -7]" not in str(client.requests[-1])
     assert "last_motion" not in client.requests[-1][0]["content"]

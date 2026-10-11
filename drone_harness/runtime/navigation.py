@@ -26,7 +26,6 @@ class NavigationPlan:
 
     original_instruction: str
     subgoals: list[NavigationSubgoal]
-    finish_action: str
     reason: str
     status: str = "running"
     stop_reason: str = ""
@@ -56,7 +55,6 @@ class NavigationPlan:
         return {
             "original_instruction": self.original_instruction,
             "subgoals": [asdict(goal) for goal in self.subgoals],
-            "finish_action": self.finish_action,
             "reason": self.reason,
             "status": self.status,
             "completed_count": self.completed_count,
@@ -76,10 +74,8 @@ class NavigationPlan:
 
 def parse_navigation_plan(value: Any, original_instruction: str) -> NavigationPlan:
     """只校验完整清单的结构，不冻结目标或检查语义完成。"""
-    if not isinstance(value, dict) or set(value) != {"subgoals", "finish_action", "reason"}:
-        raise ValueError("参数必须且只能包含 subgoals、finish_action、reason")
-    if not isinstance(value["finish_action"], str) or value["finish_action"] not in {"land", "hold"}:
-        raise ValueError("finish_action 必须为 land 或 hold")
+    if not isinstance(value, dict) or set(value) != {"subgoals", "reason"}:
+        raise ValueError("参数必须且只能包含 subgoals、reason")
     if not isinstance(value["reason"], str) or not value["reason"].strip():
         raise ValueError("reason 必须为非空文字")
     goals = value["subgoals"]
@@ -101,7 +97,7 @@ def parse_navigation_plan(value: Any, original_instruction: str) -> NavigationPl
         raise ValueError("子目标 id 不能重复")
     if sum(goal.status == "in_progress" for goal in parsed) > 1:
         raise ValueError("最多一个 in_progress 子目标")
-    plan = NavigationPlan(original_instruction, parsed, value["finish_action"], value["reason"].strip())
+    plan = NavigationPlan(original_instruction, parsed, value["reason"].strip())
     if plan.completed_count == len(parsed):
         plan.status = "finishing"
     return plan
@@ -123,8 +119,7 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
         plan = parse_navigation_plan(arguments, old.original_instruction if old else context.navigation_instruction)
     except ValueError as exc:
         return {"success": False, "error": "INVALID_NAVIGATION_PLAN", "message": str(exc), "plan_changed": False}
-    changed = old is None or (old.subgoals, old.finish_action, old.reason) != (
-        plan.subgoals, plan.finish_action, plan.reason)
+    changed = old is None or (old.subgoals, old.reason) != (plan.subgoals, plan.reason)
     compact = changed and current_subgoal_completed(old, plan)
     if changed:
         context.navigation_plan = plan
