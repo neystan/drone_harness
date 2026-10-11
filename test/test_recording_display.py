@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from drone_harness.testing.recording_display import ConsoleHistory, TextTail, wrap_cells
+from drone_harness.testing.recording_display import ConsoleHistory, CoordinatePanel, TextTail, wrap_cells
 from drone_harness.testing.batch_support import ManagedProcess
 
 
@@ -17,6 +17,27 @@ def test_wrap_preserves_long_chinese_and_tool_arguments():
     assert ''.join(lines) == text
     assert len(lines) > 5
     assert all(sum(2 if ord(char) > 127 else 1 for char in line) <= 40 for line in lines)
+
+
+def test_coordinate_panel_uses_scene_report_and_handles_missing_stale_final(tmp_path):
+    """只从评分文件展示同域坐标，不用零值冒充缺失数据，最终帧优先最终报告。"""
+    panel = CoordinatePanel(tmp_path, 640)
+    assert panel.render(now=0).shape == (120, 640, 3)
+    assert "等待坐标" in panel.text and "当前位置" not in panel.text
+    report = {"final_position_ned": [35.02, -73.40, -3.50],
+              "goal_position_ned": [26.62, -66.77, -2.56]}
+    (tmp_path / "evaluation_progress.json").write_text(json.dumps(report))
+    panel.render(now=1)
+    assert "35.02, -73.40, -3.50" in panel.text and "10.70 米" in panel.text
+    panel.render(now=5)
+    assert "更新停滞" in panel.text
+    (tmp_path / "evaluation_progress.json").write_text('{bad')
+    panel.render(now=6)
+    assert "35.02" in panel.text and "更新停滞" in panel.text
+    report["final_position_ned"] = [26.62, -66.77, -2.56]
+    (tmp_path / "evaluation.json").write_text(json.dumps(report))
+    panel.render(now=7, refresh=True)
+    assert "最终结果" in panel.text and "0.00 米" in panel.text
 
 
 def test_console_history_appends_and_can_scroll_back():

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import codecs
+import json
+import math
 import re
 import threading
 import time
@@ -13,6 +15,62 @@ from pathlib import Path
 from drone_harness.testing.video import VideoEncoder
 
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+
+
+class CoordinatePanel:
+    """仅向观看者显示评分器的场景坐标，不查询 AirSim 或修改模型图片。"""
+
+    def __init__(self, scene_dir: Path, width: int):
+        self.scene_dir, self.width = scene_dir, width
+        self.next_read = 0.0
+        self.signature = None
+        self.last_update = None
+        self.lines = []
+        self.final = False
+        self.font = ConsolePanel(width, 120).font
+        self.cached = None
+        self.text = ""
+
+    def render(self, *, now: float | None = None, refresh: bool = False):
+        """每秒读取已有评分文件，缺失或更新停滞时明确标示。"""
+        now = time.monotonic() if now is None else now
+        if refresh or now >= self.next_read:
+            self.next_read = now + 1.0
+            final_path = self.scene_dir / "evaluation.json"
+            path = final_path if final_path.is_file() else self.scene_dir / "evaluation_progress.json"
+            try:
+                stat = path.stat()
+                report = json.loads(path.read_text(encoding="utf-8"))
+                current, goal = report["final_position_ned"], report["goal_position_ned"]
+                if any(not isinstance(p, list) or len(p) != 3 or any(
+                        isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                        for v in p) for p in (current, goal)):
+                    raise ValueError("invalid scene coordinates")
+                signature = (path.name, stat.st_mtime_ns, stat.st_size)
+                if signature != self.signature:
+                    self.last_update, self.signature = now, signature
+                self.final = path == final_path
+                self.lines = ["当前位置：(" + ", ".join(f"{v:.2f}" for v in current) + ")",
+                              "终点位置：(" + ", ".join(f"{v:.2f}" for v in goal) + ")",
+                              f"水平距离：{math.hypot(current[0]-goal[0], current[1]-goal[1]):.2f} 米"]
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        note = "最终结果" if self.final else (
+            "等待坐标" if self.last_update is None else
+            "评分更新停滞" if now - self.last_update > 3.0 else "约每秒更新")
+        text = "\n".join([f"场景 NED 坐标 / 米 · {note}", *self.lines])
+        if self.cached is None or text != self.text:
+            import numpy as np
+            from PIL import Image, ImageDraw
+
+            image = Image.new("RGB", (self.width, 120), (15, 18, 22))
+            draw = ImageDraw.Draw(image)
+            for row, line in enumerate(text.splitlines()):
+                draw.text((8, 6 + row * 27), line, font=self.font,
+                          fill=(140, 200, 245) if row == 0 else (245, 245, 245))
+            self.cached = np.asarray(image)[:, :, ::-1].copy()
+            self.text = text
+        return self.cached
 
 
 def wrap_cells(text: str, columns: int) -> list[str]:

@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     from rclpy.signals import SignalHandlerOptions
     from sensor_msgs.msg import Image
     from drone_harness.config.loader import load_profile
-    from drone_harness.testing.recording_display import AsyncVideoWriter, ConsolePanel, FrameBuffer, TextTail
+    from drone_harness.testing.recording_display import AsyncVideoWriter, ConsolePanel, CoordinatePanel, FrameBuffer, TextTail
 
     root = args.run_dir
     stop = root / "stop.json"
@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     running = True
     writer = node = receiver = panel = None
     camera = FrameBuffer()
+    coordinates = CoordinatePanel(root / "scene", args.width)
     receive_stop = threading.Event()
     camera_error = []
     raw_console = TextTail(root / "agent.log")
@@ -181,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             render_started = time.perf_counter()
             frame, frame_info = snapshot
             image_height = int(frame.shape[0] * args.width / frame.shape[1]) // 2 * 2
-            panel_height = max(600, image_height)
+            panel_height = max(600, image_height + 120)
             panel_width = max(640, args.width)
             if panel is None:
                 panel = ConsolePanel(panel_width, panel_height)
@@ -198,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
                     state = event
             canvas = np.zeros((panel_height + 64, args.width + panel_width, 3), np.uint8)
             canvas[64:64 + image_height, :args.width] = cv2.resize(frame, (args.width, image_height))
+            canvas[64 + image_height:64 + image_height + 120, :args.width] = coordinates.render()
             canvas[64:, args.width:] = panel.render(live=True)
             composed_ns = time.monotonic_ns()
             age_ms = max(0, (composed_ns - frame_info["camera_receive_monotonic_ns"]) / 1e6)
@@ -256,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
                 frame, frame_info = snapshot
                 canvas = canvas.copy()
                 canvas[64:64 + image_height, :args.width] = cv2.resize(frame, (args.width, image_height))
+                canvas[64 + image_height:64 + image_height + 120, :args.width] = coordinates.render(refresh=True)
                 canvas[64:, args.width:] = panel.render(live=True)
                 composed_ns = time.monotonic_ns()
                 age_ms = max(0, (composed_ns - frame_info["camera_receive_monotonic_ns"]) / 1e6)
