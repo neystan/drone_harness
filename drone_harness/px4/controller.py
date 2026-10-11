@@ -117,6 +117,7 @@ class Px4Controller(Node):
         camera_depth_topic: str | None = None,
         camera_depth_info_topic: str | None = None,
         observation_config: ObservationConfig | None = None,
+        observation_clock_topic: str | None = None,
     ) -> None:
         """初始化 MAVROS topic、service、状态缓存和 setpoint 定时器。"""
         super().__init__(node_name)
@@ -141,7 +142,13 @@ class Px4Controller(Node):
         self._vehicle_command_ack_lock = threading.Lock()
         self.bridge = CvBridge()
         self.latest_rgb_frame = None
-        self.observation_buffer = ObservationBuffer(observation_config) if observation_config is not None else None
+        self.observation_buffer = (ObservationBuffer(observation_config, simulation_clock=bool(observation_clock_topic))
+                                   if observation_config is not None else None)
+        if observation_clock_topic:
+            from nav_msgs.msg import Odometry
+
+            self.create_subscription(Odometry, observation_clock_topic, self.observation_clock_callback,
+                                     qos_profile_sensor_data)
         self.latest_statustext = None
 
         self.setpoint_publisher = self.create_publisher(
@@ -387,6 +394,17 @@ class Px4Controller(Node):
             return None
         snapshot = self.observation_buffer.latest_snapshot(after_stamp_ns)
         return self._attach_flight_state(snapshot)
+
+    def observation_clock_callback(self, msg: Any) -> None:
+        """只读取 AirSim 状态时间，不将该消息的坐标用于控制或规划。"""
+        if self.observation_buffer is not None:
+            self.observation_buffer.add_clock(ros_stamp_ns(msg.header.stamp))
+
+    def observation_time_ns(self) -> int:
+        """以本次请求后收到的新仿真时刻建立采集边界。"""
+        if self.observation_buffer is None:
+            raise TimeoutError("observation buffer unavailable")
+        return self.observation_buffer.request_time_ns()
 
     def wait_for_observation(
         self,

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import time
 from typing import Any, Callable
 
 from drone_harness.bus import MessageBus
 from drone_harness.config.schema import RuntimeProfile
 from drone_harness.runtime.navigation import NavigationPlan, update_navigation_plan
-from drone_harness.runtime.observation import ObservationSnapshot
+from drone_harness.runtime.observation import ObservationSnapshot, observation_request_time_ns
 from drone_harness.runtime.task_state import TaskState
 from drone_harness.vision.depth_rules import DepthRules, compute_depth_rules, invalid_depth_rules
 from . import flight
@@ -105,8 +104,8 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     if wait_for_observation is None:
         return {"success": False, "error": "OBSERVATION_UNAVAILABLE",
                 "message": "当前控制器没有可用的 RGB-D 观测接口"}
-    started_ns = time.time_ns()
     try:
+        started_ns = observation_request_time_ns(context.controller)
         snapshot = wait_for_observation(after_stamp_ns=started_ns)
     except Exception as exc:
         return {"success": False, "error": "OBSERVATION_FAILED",

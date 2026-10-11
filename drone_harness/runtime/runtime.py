@@ -122,6 +122,7 @@ def _start_live_runtime(profile, *, instruction: str | None = None,
             camera_depth_topic=profile.ros.camera_depth_topic,
             camera_depth_info_topic=profile.ros.camera_depth_info_topic,
             observation_config=profile.observation,
+            observation_clock_topic=profile.ros.observation_clock_topic,
             mavros_namespace=profile.ros.mavros_namespace,
         )
         executor.add_node(controller)

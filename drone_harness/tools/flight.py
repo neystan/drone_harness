@@ -9,6 +9,7 @@ from typing import Any
 from drone_harness.bus.intervention import interrupt_if_requested
 from drone_harness.px4.frame import is_finite_number
 from drone_harness.runtime.safety import request_confirmed_hover
+from drone_harness.runtime.observation import observation_request_time_ns
 from drone_harness.vision.depth_rules import compute_depth_rules, invalid_depth_rules
 
 
@@ -660,11 +661,11 @@ def _forward_vehicle_rejection(context: Any) -> dict[str, Any] | None:
 
 def _sim_forward_rules(context: Any):
     """只为本次仿真正前进等待新 RGB-D 并计算几何上限。"""
-    started_ns = time.time_ns()
     waiter = getattr(context.controller, "wait_for_observation", None)
     if not callable(waiter):
         return invalid_depth_rules("none", "FORWARD_OBSERVATION_UNAVAILABLE")
     try:
+        started_ns = observation_request_time_ns(context.controller)
         snapshot = waiter(after_stamp_ns=started_ns)
     except Exception as exc:
         return invalid_depth_rules("none", f"FORWARD_OBSERVATION_ERROR_{type(exc).__name__}")

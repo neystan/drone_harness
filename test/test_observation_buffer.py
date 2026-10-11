@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -98,3 +99,57 @@ def test_camera_info_rejects_uncalibrated_intrinsics() -> None:
     message.d[0] = 0.1
     with pytest.raises(ValueError):
         CameraIntrinsics.from_ros_message(message)
+
+
+@pytest.mark.parametrize("jump_s", [-2, 2])
+def test_simulation_frames_survive_wall_clock_changes(monkeypatch, jump_s):
+    """同源仿真时钟不受电脑前后校时影响，旧采集帧仍然过期。"""
+    buffer = ObservationBuffer(observation_config(), simulation_clock=True)
+    stamp = 1_000_000_000_000
+    buffer.add_clock(stamp)
+    add_pair(buffer, stamp - 20_000_000)
+    monkeypatch.setattr(time, "time_ns", lambda: stamp + int(jump_s * 1e9))
+    assert buffer.latest_snapshot().depth_error == ""
+    assert buffer.latest_snapshot(after_stamp_ns=stamp) is None
+    buffer.add_clock(stamp + 2_000_000_000)
+    assert buffer.latest_snapshot() is None
+
+
+def test_simulation_request_waits_for_advancing_clock_and_rejects_queued_old_frame():
+    """新收到的旧图不能跨过本次请求的仿真采集边界。"""
+    config = replace(observation_config(), wait_timeout_s=0.2)
+    buffer = ObservationBuffer(config, simulation_clock=True)
+    stamp = 1_000_000_000_000
+    buffer.add_clock(stamp)
+    results = []
+    thread = threading.Thread(target=lambda: results.append(buffer.request_time_ns()))
+    thread.start()
+    time.sleep(0.01)
+    assert not results
+    buffer.add_clock(stamp + 100_000_000)
+    thread.join(timeout=1)
+    assert results == [stamp + 100_000_000]
+    add_pair(buffer, stamp)
+    assert buffer.latest_snapshot(after_stamp_ns=results[0]) is None
+    buffer.add_clock(stamp + 150_000_000)
+    add_pair(buffer, stamp + 140_000_000)
+    assert buffer.latest_snapshot(after_stamp_ns=results[0]).depth_error == ""
+
+
+def test_simulation_missing_frozen_or_reset_clock_fails_closed(monkeypatch):
+    """缺失和冻结时钟不放行，仿真重置后清除上一场景的观测。"""
+    buffer = ObservationBuffer(observation_config(), simulation_clock=True)
+    with pytest.raises(TimeoutError):
+        buffer.request_time_ns()
+    stamp = 1_000_000_000_000
+    buffer.add_clock(stamp)
+    add_pair(buffer, stamp)
+    assert buffer.latest_snapshot() is not None
+    buffer.add_clock(stamp - 1_000_000_000)
+    assert buffer.latest_snapshot() is None
+    add_pair(buffer, stamp - 1_000_000_000)
+    assert buffer.latest_snapshot() is not None
+    now = time.monotonic_ns()
+    monkeypatch.setattr(time, "monotonic_ns", lambda: now + 2_000_000_000)
+    buffer.add_clock(stamp - 1_000_000_000)
+    assert buffer.latest_snapshot() is None

@@ -57,6 +57,21 @@ def test_sim_forward_ignores_subminimum_motion(tmp_path, monkeypatch, safe_limit
         move.assert_not_called()
 
 
+@pytest.mark.parametrize("tool", ["observe", "forward"])
+def test_observe_and_forward_use_controller_capture_clock(tmp_path, monkeypatch, tool):
+    """两个取图入口均以控制器同源时间建立新图边界。"""
+    controller = SimpleNamespace(observation_time_ns=lambda: 1_000_000_000,
+                                 wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns),
+                                 vehicle_status=SimpleNamespace(mode="OFFBOARD", connected=True, armed=True),
+                                 flight_state=lambda: "IN_AIR")
+    context = context_for(tmp_path, controller)
+    monkeypatch.setattr(flight, "move", Mock(return_value={"success": True}))
+    arguments = {"prompt": "检查前方"} if tool == "observe" else {"distance_m": 1.0}
+    result = dispatch_tool_call(context, tool_call(tool, arguments))
+    assert result["success"]
+    assert context.observation is not None if tool == "observe" else result["motion_executed"]
+
+
 def test_first_model_request_is_text_only_then_observe_feeds_same_model(tmp_path: Path) -> None:
     """首图必须由 observe 获取，并在成对工具结果后交回同一个模型。"""
     seen_stamps: list[int] = []

@@ -8,6 +8,7 @@ ros:
   camera_scene_topic: /airsim_node/PX4/CameraDepth1/Scene
   camera_depth_topic: /airsim_node/PX4/CameraDepth1/DepthPerspective
   camera_depth_info_topic: /airsim_node/PX4/CameraDepth1/DepthPerspective/camera_info
+  observation_clock_topic: /airsim_node/PX4/odom_local_ned  # 只读取 header 中的仿真时间。
   mavros_namespace: /mavros
   mavros_fcu_url: udp://:14540@127.0.0.1:14580
 

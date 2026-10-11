@@ -125,6 +125,7 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
             camera_depth_info_topic=ros.get("camera_depth_info_topic"),
             mavros_namespace=str(ros.get("mavros_namespace", "/mavros")),
             mavros_fcu_url=str(ros.get("mavros_fcu_url", "")).strip(),
+            observation_clock_topic=ros.get("observation_clock_topic"),
         ),
         storage=StorageConfig(
             photo_save_dir=str(storage["photo_save_dir"]),

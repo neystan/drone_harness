@@ -24,6 +24,12 @@ def ros_stamp_ns(stamp: Any) -> int:
     return seconds * 1_000_000_000 + nanoseconds
 
 
+def observation_request_time_ns(controller: Any) -> int:
+    """复用控制器的采集时间域；兼容没有时钟接口的现有控制器。"""
+    clock = getattr(controller, "observation_time_ns", None)
+    return clock() if callable(clock) else time.time_ns()
+
+
 @dataclass(frozen=True)
 class CameraIntrinsics:
     """保存深度相机的针孔内参和对应采集时间。"""
@@ -106,7 +112,7 @@ class ObservationSnapshot:
 class ObservationBuffer:
     """以小型有界缓冲配对同一时钟域的 RGB、深度与内参。"""
 
-    def __init__(self, config: ObservationConfig, capacity: int = 8) -> None:
+    def __init__(self, config: ObservationConfig, capacity: int = 8, *, simulation_clock: bool = False) -> None:
         """建立线程安全的有界观测缓存。"""
         if capacity < 2:
             raise ValueError("observation buffer capacity must be at least 2")
@@ -115,6 +121,47 @@ class ObservationBuffer:
         self._rgb: deque[ImageSample] = deque(maxlen=capacity)
         self._depth: deque[ImageSample] = deque(maxlen=capacity)
         self._intrinsics: deque[CameraIntrinsics] = deque(maxlen=capacity)
+        self.simulation_clock = simulation_clock
+        self._clock_stamp_ns = 0
+        self._clock_received_ns = 0
+        self._clock_generation = 0
+
+    def add_clock(self, stamp_ns: int) -> None:
+        """缓存前进的仿真时钟，时间重置时丢弃旧场景观测。"""
+        if stamp_ns <= 0:
+            return
+        with self._condition:
+            if stamp_ns == self._clock_stamp_ns:
+                return
+            if stamp_ns < self._clock_stamp_ns:
+                self._rgb.clear()
+                self._depth.clear()
+                self._intrinsics.clear()
+                self._clock_generation += 1
+            self._clock_stamp_ns = stamp_ns
+            self._clock_received_ns = time.monotonic_ns()
+            self._condition.notify_all()
+
+    def request_time_ns(self) -> int:
+        """等待请求后的新时钟样本，避免以积压图片作为采集边界。"""
+        if not self.simulation_clock:
+            return time.time_ns()
+        started = time.monotonic_ns()
+        deadline = started + int(self.config.wait_timeout_s * 1e9)
+        with self._condition:
+            while self._clock_received_ns <= started:
+                remaining = deadline - time.monotonic_ns()
+                if remaining <= 0:
+                    raise TimeoutError("AirSim observation clock unavailable")
+                self._condition.wait(remaining / 1e9)
+            return self._clock_stamp_ns
+
+    def _source_now_ns(self, monotonic_ns: int) -> int:
+        """仿真使用同源时钟，实机保持原系统采集时间校验。"""
+        if not self.simulation_clock:
+            return time.time_ns()
+        age = monotonic_ns - self._clock_received_ns
+        return self._clock_stamp_ns if 0 <= age <= int(self.config.max_frame_age_s * 1e9) else 0
 
     def add_rgb(
         self,
@@ -181,7 +228,8 @@ class ObservationBuffer:
     def latest_snapshot(self, after_stamp_ns: int = 0) -> ObservationSnapshot | None:
         """无阻塞地读取最新有效 RGB，缺深度时显式标记原因。"""
         with self._condition:
-            return self._select_snapshot(after_stamp_ns, time.time_ns(), time.monotonic_ns())
+            now = time.monotonic_ns()
+            return self._select_snapshot(after_stamp_ns, self._source_now_ns(now), now)
 
     def wait_for_snapshot(
         self,
@@ -194,11 +242,15 @@ class ObservationBuffer:
             raise ValueError("observation wait timeout is invalid")
         deadline_ns = time.monotonic_ns() + int(budget_s * 1_000_000_000)
         with self._condition:
+            generation = self._clock_generation
             while True:
+                if generation != self._clock_generation:
+                    return None
+                now = time.monotonic_ns()
                 snapshot = self._select_snapshot(
                     after_stamp_ns,
-                    time.time_ns(),
-                    time.monotonic_ns(),
+                    self._source_now_ns(now),
+                    now,
                 )
                 if snapshot is not None and not snapshot.depth_error:
                     return snapshot
@@ -214,6 +266,8 @@ class ObservationBuffer:
         now_monotonic_ns: int,
     ) -> ObservationSnapshot | None:
         """在锁内选择最新且确实晚于动作结束的配对。"""
+        if now_wall_ns <= 0:
+            return None
         threshold_ns = (
             after_stamp_ns + int(self.config.max_clock_skew_s * 1_000_000_000)
             if after_stamp_ns > 0
