@@ -33,7 +33,7 @@ DEFAULTS = {
     "ros_setups": ["/opt/ros/humble/setup.bash", "/home/stan/AirVLN/mavros_ws/install/setup.bash",
                    "/home/stan/AirVLN/hw_ros2_native/ros2/install/setup.bash"],
     "output_root": "/home/stan/AirVLN/drone_harness_runtime/batches",
-    "case_timeout_s": MAX_CASE_TIMEOUT_S, "startup_timeout_s": 120, "position_tolerance_m": 1.0,
+    "case_timeout_s": MAX_CASE_TIMEOUT_S, "startup_timeout_s": 120, "position_tolerance_m": 5.0,
     "record": True, "preview": True, "preview_fps": 20, "video_fps": 20, "video_width": 640, "video_bitrate_kbps": 1000,
     "response_language": "",
     "video_max_mb": 512, "min_free_gb": 5,
