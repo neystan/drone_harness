@@ -1,6 +1,6 @@
 # drone_harness 项目交接概览
 
-最后更新：2026-10-16（Asia/Shanghai）。当前待办与用户最新取舍以 [STATUS.md](STATUS.md) 为准。
+最后更新：2026-10-17（Asia/Shanghai）。当前待办与用户最新取舍以 [STATUS.md](STATUS.md) 为准。
 
 本文件帮助新会话理解项目，不替代实际代码、运行证据和用户最新指令。这里明确区分已经实现的功能、历史验证结果与尚未实现的建议。
 
@@ -75,7 +75,7 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 ## 本轮讨论结论
 
-用户希望以最小改动改善启动可靠性、目标搜索和完成判断。当前只保留 STATUS.md 中的三项待办。
+用户希望以最小改动改善启动可靠性、目标搜索和完成判断。当前任务以 STATUS.md 为准；2026-10-16 已将按需测距与前下双视图分别列为第 4、5 项独立待办。
 
 2026-10-16 已按用户决定将批测位置容差增至 5 米，完成阈值修改与离线检查。新批次默认使用新阈值，已有批次的冻结源码与历史结果保留原样。
 
@@ -87,7 +87,7 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 核验边界：当前启动设置中的相机为前视，原地四向采图不能直接证明正下方、屋顶中央或下方着陆区。已有 RGB-D 和内参可作为后续目标区域测距的基础，但当前对模型只返回障碍净空摘要，尚未实现目标区域定位、对应深度、完整采图位姿绑定或语义完成验证。目标外观/关系/路线核对、动作前后证据和局部几何核验均为讨论建议，搜索实现范围与接口仍未定稿。
 
-2026-10-16 后续调研：用户提出下视 RGB，继续讨论建筑/店铺的目标身份、接近距离与位置关系；下视相机仍未决定实施，测距的后续约定见下文。已阅读 [VLFM 目标点云代码](https://github.com/rai-opensource/vlfm/blob/main/vlfm/mapping/object_point_cloud_map.py)、[VLMaps 几何关系代码](https://github.com/vlmaps/vlmaps/blob/master/vlmaps/map/map.py)、[GOAT 实例记忆说明](https://theophilegervet.github.io/projects/goat/)、[Nav2 停止到达检查](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/core_servers/controller_server/controller_server_plugins/stopped_goal_checker/)及 Isaac ROS FoundationPose 官方接口。详细调研记录在桌面“仿真批量测试.md”，未安装或运行这些系统。
+2026-10-16 后续调研：用户提出下视 RGB，继续讨论建筑/店铺的目标身份、接近距离与位置关系；下视相机与测距的后续约定见下文。已阅读 [VLFM 目标点云代码](https://github.com/rai-opensource/vlfm/blob/main/vlfm/mapping/object_point_cloud_map.py)、[VLMaps 几何关系代码](https://github.com/vlmaps/vlmaps/blob/master/vlmaps/map/map.py)、[GOAT 实例记忆说明](https://theophilegervet.github.io/projects/goat/)、[Nav2 停止到达检查](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/core_servers/controller_server/controller_server_plugins/stopped_goal_checker/)及 Isaac ROS FoundationPose 官方接口。详细调研记录在桌面“仿真批量测试.md”，未安装或运行这些系统。
 
 可借鉴的分工是目标区域深度/点云测量、跨视角实例对应、将空间关系转换为几何目标、位置/朝向/停止状态分别检查。VLFM 按类别累积点云并依赖检测/分割模型；GOAT 与 VLMaps 依赖地图或实例记忆；Isaac ROS FoundationPose 接口需要目标网格等输入。这些地面导航或物体位姿方案不直接证明本项目的指定建筑入口、屋顶范围和三维飞越。仅使用主 VLM 选框或选点是简化讨论方向，尚未证明可达到专门分割与几何处理的效果；地图、多模型及新依赖均未成为实施决定。
 
@@ -95,7 +95,9 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 2026-10-16 已认可“VLM 选点、程序取周围小区域”的方式：复用模型所见同一帧的配对深度，过滤无效值后做中位数汇总，深度分歧明显或有效样本不足时报告不可靠。拟返回相机到选定可见表面的射线距离和有效性，不把它直接作为水平航程、目标中心距离或通用到达证明。坐标约定、邻域尺寸与质量阈值仍需核对；当前仅完成方案整理，测距工具、动作后失效处理和针对性离线测试尚未实现，实际选点效果与延迟未验证。
 
-2026-10-16 论文启发讨论后的范围确认：用户同意带问题观察，要求四图联合判断仅用于搜索 skill；来源标注、候选结构化记录、旋转/移动后的实例重新辨认及提示词调整仍待评估。现有 `evidence` 已是计划字段，候选检查记录如何保存没有定稿。观察来源只说明拍摄位置、朝向和时间，不能自动给出目标坐标或保证跨视角跟踪；普通导航最新一图的边界不因本次讨论自动扩大。仅做分析与范围记录，没有实现或获得新的仿真效果。
+2026-10-16 最新任务决定：按需选点测距独立列入 STATUS.md 第 4 项，完整实现、针对性测试和相应仓库文档合并一次本地提交。用户同时明确新增下视 RGB 摄像头与前下双视图能力，列为第 5 项：一次普通观察在同一模型请求中提供明确标注前方、下方的两张独立图片，更新最新图组的上下文管理，并核对图像朝向、时间对应和缺图反馈；测距仍使用已有前视配对深度。两个任务均尚未实现，本次只记录范围，没有启动仿真或请求真实模型。
+
+2026-10-16 论文启发讨论后的范围确认：用户同意带问题观察，要求四图联合判断仅用于搜索 skill；来源标注、候选结构化记录、旋转/移动后的实例重新辨认及提示词调整仍待评估。现有 `evidence` 已是计划字段，候选检查记录如何保存没有定稿。观察来源只说明拍摄位置、朝向和时间，不能自动给出目标坐标或保证跨视角跟踪；当前普通导航仍只保留最新一图，前下双视图的后续改造见 STATUS.md 第 5 项。仅做分析与范围记录，没有实现或获得新的仿真效果。
 
 当前本机配置在 2026-10-12 只读检查时使用 `glm-5.3-flash`；模型可能随本地设置变化，不把它硬编码成项目要求。[智谱官方文档](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash) 支持多图内容块，但本项目四图请求、效果和耗时尚未实际验证。
 
