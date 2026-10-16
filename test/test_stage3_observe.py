@@ -61,7 +61,7 @@ def test_sim_forward_ignores_subminimum_motion(tmp_path, monkeypatch, safe_limit
 def test_observe_and_forward_use_controller_capture_clock(tmp_path, monkeypatch, tool):
     """两个取图入口均以控制器同源时间建立新图边界。"""
     controller = SimpleNamespace(observation_time_ns=lambda: 1_000_000_000,
-                                 wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns),
+                                 wait_for_observation=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns),
                                  vehicle_status=SimpleNamespace(mode="OFFBOARD", connected=True, armed=True),
                                  flight_state=lambda: "IN_AIR")
     context = context_for(tmp_path, controller)
@@ -76,7 +76,7 @@ def test_first_model_request_is_text_only_then_observe_feeds_same_model(tmp_path
     """首图必须由 observe 获取，并在成对工具结果后交回同一个模型。"""
     seen_stamps: list[int] = []
 
-    def wait_for_observation(*, after_stamp_ns: int, timeout_s: float | None = None):
+    def wait_for_observation(*, after_stamp_ns: int, timeout_s: float | None = None, view="front"):
         """模拟按需等待一组新鲜的同步图像。"""
         seen_stamps.append(after_stamp_ns)
         return fresh_snapshot(after_stamp_ns)
@@ -121,7 +121,7 @@ def test_observe_rejects_empty_prompt_before_waiting_for_image(tmp_path: Path) -
 
 def test_observe_with_invalid_depth_still_sends_rgb_to_same_model(tmp_path: Path) -> None:
     """深度缺失只标未知，不吞掉已取得的 RGB 图像。"""
-    controller = SimpleNamespace(wait_for_observation=lambda *, after_stamp_ns: replace(
+    controller = SimpleNamespace(wait_for_observation=lambda *, after_stamp_ns, view="front": replace(
         fresh_snapshot(after_stamp_ns), depth=None, depth_stamp_ns=None, depth_error="DEPTH_MISSING"))
     context = context_for(tmp_path, controller)
     messages = [{"role": "system", "content": "test"}, {"role": "user", "content": "找目标"}]
@@ -141,7 +141,7 @@ def test_observe_with_invalid_depth_still_sends_rgb_to_same_model(tmp_path: Path
 
 def test_real_observe_does_not_ask_for_flight_hitl(tmp_path: Path) -> None:
     """观察是非飞行工具，实机逐动作审批不应误拦取图。"""
-    controller = SimpleNamespace(wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns))
+    controller = SimpleNamespace(wait_for_observation=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns))
     context = context_for(tmp_path, controller)
     context.profile = replace(context.profile, mode="real")
     result = dispatch_tool_call(context, tool_call("observe", {"prompt": "检查前方"}))
@@ -176,7 +176,7 @@ def test_successful_motion_does_not_automatically_observe(tmp_path: Path, monkey
 
 def test_motion_then_explicit_observe_sends_new_frame_to_same_model(tmp_path: Path, monkeypatch) -> None:
     """移动后只有模型主动调用 observe，下一次请求才带新图。"""
-    wait = Mock(side_effect=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns))
+    wait = Mock(side_effect=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns))
     controller = SimpleNamespace(wait_for_observation=wait,
                                  current_position_ned=lambda: (0.0, 0.0, -1.0))
     context = context_for(tmp_path, controller)
@@ -208,7 +208,7 @@ def test_sim_forward_gets_new_depth_without_observe_and_clamps(tmp_path: Path, m
     """没有模型可见图像也必须先获取新深度，近障上限优先于 19 米。"""
     observed: list[int] = []
 
-    def wait_for_observation(*, after_stamp_ns: int, timeout_s: float | None = None):
+    def wait_for_observation(*, after_stamp_ns: int, timeout_s: float | None = None, view="front"):
         """提供只属于本次前进调用的新深度。"""
         observed.append(after_stamp_ns)
         return fresh_snapshot(after_stamp_ns, 1.55)
@@ -266,7 +266,7 @@ def test_sim_forward_rejects_stale_frame_and_mismatched_rules(tmp_path: Path, mo
     assert stale["success"] and stale["commanded_distance_m"] == 0
     assert stale["depth_reason"] == "FORWARD_RGB_NOT_NEW"
 
-    controller.wait_for_observation = lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns)
+    controller.wait_for_observation = lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns)
     from drone_harness.vision.depth_rules import invalid_depth_rules
     monkeypatch.setattr(flight, "compute_depth_rules", lambda *_args: invalid_depth_rules("wrong", "TEST"))
     mismatch = flight.forward(context, 2.0)
@@ -279,7 +279,7 @@ def test_sim_forward_rechecks_px4_after_waiting_for_depth(tmp_path: Path, monkey
     """等新深度期间飞控模式变化时不能继续下发前进目标。"""
     status = SimpleNamespace(mode="OFFBOARD", connected=True, armed=True)
 
-    def wait_for_observation(*, after_stamp_ns: int):
+    def wait_for_observation(*, after_stamp_ns: int, view="front"):
         """模拟取图时 PX4 离开允许模式。"""
         status.mode = "MANUAL"
         return fresh_snapshot(after_stamp_ns)
@@ -296,7 +296,7 @@ def test_sim_forward_rechecks_px4_after_waiting_for_depth(tmp_path: Path, monkey
 
 def test_repeated_observe_keeps_complete_tool_pairs_and_bounded_images(tmp_path: Path) -> None:
     """多次观察保留所有工具配对和文字，仅发送最新图片。"""
-    controller = SimpleNamespace(wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns))
+    controller = SimpleNamespace(wait_for_observation=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns))
     context = context_for(tmp_path, controller)
     messages = [{"role": "system", "content": "test"}, {"role": "user", "content": "找门"}]
     client = FakeClient([

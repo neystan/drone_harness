@@ -1,4 +1,4 @@
-"""在现有 ROS 节点内缓存并配对前视 RGB-D 观测。"""
+"""在现有 ROS 节点内缓存前视 RGB-D 与下视 RGB，并按需配对。"""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ class ImageSample:
 
 @dataclass(frozen=True)
 class ObservationSnapshot:
-    """绑定一次 RGB 与可选的同次深度、内参和飞行状态。"""
+    """绑定所选视角图组，只有前视携带配对深度与内参。"""
 
     observation_id: str
     rgb: np.ndarray
@@ -107,10 +107,12 @@ class ObservationSnapshot:
     pose_ned: tuple[float, float, float] | None = None
     flight_state: str | None = None
     pose_age_s: float | None = None
+    view: str = "front"
+    down_rgb: ImageSample | None = None
 
 
 class ObservationBuffer:
-    """以小型有界缓冲配对同一时钟域的 RGB、深度与内参。"""
+    """以小型有界缓冲配对同一时钟域的前下图与前视深度。"""
 
     def __init__(self, config: ObservationConfig, capacity: int = 8, *, simulation_clock: bool = False) -> None:
         """建立线程安全的有界观测缓存。"""
@@ -119,6 +121,7 @@ class ObservationBuffer:
         self.config = config
         self._condition = threading.Condition()
         self._rgb: deque[ImageSample] = deque(maxlen=capacity)
+        self._down_rgb: deque[ImageSample] = deque(maxlen=capacity)
         self._depth: deque[ImageSample] = deque(maxlen=capacity)
         self._intrinsics: deque[CameraIntrinsics] = deque(maxlen=capacity)
         self.simulation_clock = simulation_clock
@@ -135,6 +138,7 @@ class ObservationBuffer:
                 return
             if stamp_ns < self._clock_stamp_ns:
                 self._rgb.clear()
+                self._down_rgb.clear()
                 self._depth.clear()
                 self._intrinsics.clear()
                 self._clock_generation += 1
@@ -169,8 +173,11 @@ class ObservationBuffer:
         stamp_ns: int,
         frame_id: str = "",
         received_monotonic_ns: int | None = None,
+        *, view: str = "front",
     ) -> None:
-        """复制并缓存一张带原始采集时间的 BGR 帧。"""
+        """按前方或下方视角缓存带原始时间的 BGR 帧。"""
+        if view not in {"front", "down"}:
+            raise ValueError("unsupported RGB camera view")
         image = np.asarray(frame)
         if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
             raise ValueError("RGB frame must be an HxWx3 uint8 array")
@@ -187,8 +194,9 @@ class ObservationBuffer:
         )
         sample.frame.setflags(write=False)
         with self._condition:
-            if not self._rgb or sample.stamp_ns > self._rgb[-1].stamp_ns:
-                self._rgb.append(sample)
+            frames = self._down_rgb if view == "down" else self._rgb
+            if not frames or sample.stamp_ns > frames[-1].stamp_ns:
+                frames.append(sample)
                 self._condition.notify_all()
 
     def add_depth(
@@ -225,18 +233,19 @@ class ObservationBuffer:
                 self._intrinsics.append(intrinsics)
                 self._condition.notify_all()
 
-    def latest_snapshot(self, after_stamp_ns: int = 0) -> ObservationSnapshot | None:
+    def latest_snapshot(self, after_stamp_ns: int = 0, *, view: str = "front") -> ObservationSnapshot | None:
         """无阻塞地读取最新有效 RGB，缺深度时显式标记原因。"""
         with self._condition:
             now = time.monotonic_ns()
-            return self._select_snapshot(after_stamp_ns, self._source_now_ns(now), now)
+            return self._select_snapshot(after_stamp_ns, self._source_now_ns(now), now, view)
 
     def wait_for_snapshot(
         self,
         after_stamp_ns: int = 0,
         timeout_s: float | None = None,
+        *, view: str = "front",
     ) -> ObservationSnapshot | None:
-        """等待动作之后的新 RGB-D，超时可返回带失效深度的 RGB。"""
+        """用一个截止时间等待所选视角，下视不等待前视或深度。"""
         budget_s = self.config.wait_timeout_s if timeout_s is None else timeout_s
         if not math.isfinite(budget_s) or budget_s < 0:
             raise ValueError("observation wait timeout is invalid")
@@ -251,8 +260,9 @@ class ObservationBuffer:
                     after_stamp_ns,
                     self._source_now_ns(now),
                     now,
+                    view,
                 )
-                if snapshot is not None and not snapshot.depth_error:
+                if snapshot is not None and (view == "down" or not snapshot.depth_error):
                     return snapshot
                 remaining_ns = deadline_ns - time.monotonic_ns()
                 if remaining_ns <= 0:
@@ -264,8 +274,11 @@ class ObservationBuffer:
         after_stamp_ns: int,
         now_wall_ns: int,
         now_monotonic_ns: int,
+        view: str = "front",
     ) -> ObservationSnapshot | None:
-        """在锁内选择最新且确实晚于动作结束的配对。"""
+        """在锁内按请求视角选择新图，双图检查同源时间差。"""
+        if view not in {"front", "down", "both"}:
+            raise ValueError("unsupported observation view")
         if now_wall_ns <= 0:
             return None
         threshold_ns = (
@@ -273,18 +286,33 @@ class ObservationBuffer:
             if after_stamp_ns > 0
             else 0
         )
-        rgb = next(
-            (
-                item
-                for item in reversed(self._rgb)
-                if item.stamp_ns > threshold_ns
-                and self._fresh(item, now_wall_ns, now_monotonic_ns)
-            ),
-            None,
-        )
-        if rgb is None:
+        frames = self._down_rgb if view == "down" else self._rgb
+        fresh = [item for item in reversed(frames) if item.stamp_ns > threshold_ns
+                 and self._fresh(item, now_wall_ns, now_monotonic_ns)]
+        if not fresh:
             return None
+        rgb = fresh[0]
         sync_ns = int(self.config.max_sync_delta_s * 1_000_000_000)
+        down = None
+        if view == "both":
+            candidates = [item for item in self._down_rgb if item.stamp_ns > threshold_ns
+                          and self._fresh(item, now_wall_ns, now_monotonic_ns)]
+            for front in fresh:
+                matches = [item for item in candidates
+                           if abs(item.stamp_ns - front.stamp_ns) <= sync_ns]
+                if matches:
+                    rgb = front
+                    down = min(matches, key=lambda item: abs(item.stamp_ns - front.stamp_ns))
+                    break
+            if down is None:
+                return None
+        if view == "down":
+            return ObservationSnapshot(
+                observation_id=f"down-rgb-{rgb.stamp_ns}", rgb=rgb.frame,
+                rgb_stamp_ns=rgb.stamp_ns, rgb_frame_id=rgb.frame_id,
+                depth=None, depth_stamp_ns=None, depth_frame_id=None, depth_encoding=None,
+                intrinsics=None, depth_error="DOWN_RGB_ONLY",
+                received_monotonic_ns=rgb.received_monotonic_ns, view="down")
         depth_candidates = [
             item
             for item in self._depth
@@ -311,7 +339,8 @@ class ObservationBuffer:
             else:
                 reason = "CAMERA_INFO_MISSING_OR_UNSYNCED"
         return ObservationSnapshot(
-            observation_id=f"rgb-{rgb.stamp_ns}",
+            observation_id=(f"front-{rgb.stamp_ns}-down-{down.stamp_ns}" if down is not None
+                            else f"rgb-{rgb.stamp_ns}"),
             rgb=rgb.frame,
             rgb_stamp_ns=rgb.stamp_ns,
             rgb_frame_id=rgb.frame_id,
@@ -322,6 +351,7 @@ class ObservationBuffer:
             intrinsics=intrinsics,
             depth_error=reason,
             received_monotonic_ns=rgb.received_monotonic_ns,
+            view=view, down_rgb=down,
         )
 
     def _fresh(self, sample: ImageSample, now_wall_ns: int, now_monotonic_ns: int) -> bool:
@@ -339,25 +369,40 @@ def build_observation_message(
     snapshot: ObservationSnapshot, rules: Any, prompt: str | None = None,
 ) -> dict[str, Any]:
     """把观察提示、同号深度摘要与内存 JPEG 合成一条消息。"""
-    if snapshot.rgb is None or snapshot.rgb.size == 0 or snapshot.rgb_stamp_ns <= 0:
-        raise ValueError("RGB observation is unavailable")
     if rules.observation_id != snapshot.observation_id:
         raise ValueError("depth rules do not match the RGB observation")
-    if snapshot.rgb.shape[0] * snapshot.rgb.shape[1] > 640 * 480 * 2:
+    if snapshot.view not in {"front", "down", "both"} or snapshot.rgb_stamp_ns <= 0:
+        raise ValueError("invalid observation view or timestamp")
+    primary_image = encode_observation_image(snapshot.rgb)
+    focus = f"观察重点：{prompt}\n" if prompt else ""
+    label = "下方摄像头" if snapshot.view == "down" else "前方摄像头"
+    height, width = snapshot.rgb.shape[:2]
+    summary = focus + f"【{label}】图像尺寸：{width}×{height}。\n"
+    if snapshot.view == "down":
+        summary += "固定向下RGB；图像上方朝机头、右方朝机体右侧，不提供下方距离或净空。"
+    else:
+        summary += "测距选点使用左上原点的 0 到 1 归一化坐标。\n" + rules.as_text()
+    content = [{"type": "text", "text": summary}, primary_image]
+    if snapshot.view == "both":
+        if snapshot.down_rgb is None:
+            raise ValueError("down image missing in dual view observation")
+        content.extend([
+            {"type": "text", "text": "【下方摄像头】固定向下RGB；图像上方朝机头、右方朝机体右侧，不提供下方距离或净空。"},
+            encode_observation_image(snapshot.down_rgb.frame),
+        ])
+    return {"role": "user", "content": content}
+
+
+def encode_observation_image(frame: np.ndarray) -> dict[str, Any]:
+    """把单张 BGR 图编码为有尺寸与字节上限的模型图片块。"""
+    if frame is None or frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[2] != 3 or frame.size == 0:
+        raise ValueError("RGB observation is unavailable")
+    if frame.shape[0] * frame.shape[1] > 640 * 480 * 2:
         raise ValueError("RGB observation exceeds image size limit")
     import cv2
 
-    encoded_ok, encoded = cv2.imencode(".jpg", snapshot.rgb, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    encoded_ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
     if not encoded_ok or len(encoded) > 1_000_000:
         raise ValueError("RGB JPEG encoding failed or exceeded byte limit")
     data_url = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
-    focus = f"观察重点：{prompt}\n" if prompt else ""
-    height, width = snapshot.rgb.shape[:2]
-    summary = focus + f"前视图尺寸：{width}×{height}；测距选点使用左上原点的 0 到 1 归一化坐标。\n" + rules.as_text()
-    return {
-        "role": "user",
-        "content": [
-            {"type": "text", "text": summary},
-            {"type": "image_url", "image_url": {"url": data_url, "detail": "low"}},
-        ],
-    }
+    return {"type": "image_url", "image_url": {"url": data_url, "detail": "low"}}

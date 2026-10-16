@@ -393,3 +393,32 @@ index 39c8cc6..f7815f3 100644
 
 
  if __name__ == "__main__":
+diff --git a/tools/aerialvln_case.py b/tools/aerialvln_case.py
+index d4295de..8e9976e 100644
+--- a/tools/aerialvln_case.py
++++ b/tools/aerialvln_case.py
+@@ -155,6 +155,8 @@ def build_px4_settings(
+     view_mode: str = "NoDisplay",
+ ) -> dict[str, Any]:
+     """Build a standalone PX4Multirotor AirSim settings document."""
++    if camera_name == "CameraDown":
++        raise ValueError("front camera name must differ from CameraDown")
+     x, y, z = case.start_position
+     yaw = quaternion_wxyz_to_yaw_deg(case.start_rotation)
+     return {
+@@ -203,7 +205,14 @@ def build_px4_settings(
+                         "Pitch": 0,
+                         "Roll": 0,
+                         "Yaw": 0,
+-                    }
++                    },
++                    "CameraDown": {
++                        "CaptureSettings": [
++                            {"ImageType": 0, "Width": 640, "Height": 480, "FOV_Degrees": 94},
++                        ],
++                        "X": 0, "Y": 0, "Z": 0.2,
++                        "Pitch": -90, "Roll": 0, "Yaw": 0,
++                    },
+                 },
+             }
+         },

@@ -99,12 +99,14 @@ OBSERVE_TOOL_SCHEMA = {
     "function": {
         "name": "observe",
         "description": (
-            "获取当前 RGB 图像与深度摘要。prompt 简洁描述观察目标，"
+            "按 view 获取前方、下方或前下两图；每张图标注视角，下视仅RGB。默认 front。prompt 简洁描述观察目标，"
             "不重复索取深度摘要、询问飞行状态或要求计算移动距离。"
         ),
         "parameters": {
             "type": "object",
             "properties": {
+                "view": {"type": "string", "enum": ["front", "down", "both"],
+                         "description": "front 只看前方（默认），down 只看下方，both 在同一次模型请求中看两图。"},
                 "prompt": {
                     "type": "string",
                     "description": (

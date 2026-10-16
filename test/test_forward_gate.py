@@ -43,7 +43,7 @@ def forward_context(tmp_path: Path):
     controller = SimpleNamespace(
         vehicle_status=SimpleNamespace(mode="OFFBOARD", connected=True, armed=True),
         flight_state=lambda: "IN_AIR", latest_observation=lambda: snapshot,
-        wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns),
+        wait_for_observation=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns),
     )
     context = context_for(tmp_path, controller)
     config = context.profile.observation
@@ -81,7 +81,7 @@ def test_model_latency_does_not_replace_forward_time_depth(tmp_path: Path, monke
     context.observation = replace(context.observation,
                                   rgb_stamp_ns=time.time_ns() - 10_000_000_000,
                                   depth_stamp_ns=time.time_ns() - 10_000_000_000)
-    wait = Mock(side_effect=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns))
+    wait = Mock(side_effect=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns))
     context.controller.wait_for_observation = wait
     monkeypatch.setattr(flight, "move", Mock(return_value={"success": True}))
     assert flight.forward(context, 0.1)["success"]
@@ -93,7 +93,7 @@ def test_old_a_mismatch_is_ignored_but_new_invalid_depth_returns_no_motion(tmp_p
     context = forward_context(tmp_path)
     context.depth_rules = replace(context.depth_rules, observation_id="other")
     assert flight.validate_forward(context, 0.1) is None
-    context.controller.wait_for_observation = lambda *, after_stamp_ns: replace(
+    context.controller.wait_for_observation = lambda *, after_stamp_ns, view="front": replace(
         fresh_snapshot(after_stamp_ns), depth_error="DEPTH_UNSYNCED")
     calls = Mock()
     monkeypatch.setattr(flight, "move", calls)
@@ -109,7 +109,7 @@ def test_new_sensor_frame_recalculates_forward_limit(tmp_path: Path, monkeypatch
     """即使旧 A 显示远景，本次前进仍使用新帧的近障上限。"""
     context = forward_context(tmp_path)
     context.depth_rules = replace(context.depth_rules, forward_max_m=19.0)
-    context.controller.wait_for_observation = lambda *, after_stamp_ns: near_snapshot(after_stamp_ns)
+    context.controller.wait_for_observation = lambda *, after_stamp_ns, view="front": near_snapshot(after_stamp_ns)
     move = Mock(return_value={"success": True, "message": "move complete"})
     monkeypatch.setattr(flight, "move", move)
     result = flight.forward(context, 5.0)
@@ -146,7 +146,7 @@ def test_real_forward_still_rejects_loiter(tmp_path: Path) -> None:
 def test_sim_forward_clamps_to_new_depth_limit_and_profile_cap(tmp_path: Path, monkeypatch) -> None:
     """仿真超本次新深度或 19 米上限时按较小值下发并说明。"""
     context = forward_context(tmp_path)
-    context.controller.wait_for_observation = lambda *, after_stamp_ns: near_snapshot(after_stamp_ns)
+    context.controller.wait_for_observation = lambda *, after_stamp_ns, view="front": near_snapshot(after_stamp_ns)
     move = Mock(return_value={"success": True, "message": "move complete"})
     monkeypatch.setattr(flight, "move", move)
     assert context.profile.forward_step_limit_m == 19
@@ -160,7 +160,7 @@ def test_sim_forward_clamps_to_new_depth_limit_and_profile_cap(tmp_path: Path, m
     assert "1 米" in result["message"]
     assert move.call_args.args[1:] == (result["commanded_distance_m"], 0.0, 0.0)
 
-    context.controller.wait_for_observation = lambda *, after_stamp_ns: replace(
+    context.controller.wait_for_observation = lambda *, after_stamp_ns, view="front": replace(
         fresh_snapshot(after_stamp_ns, 65504.0),
         intrinsics=replace(fresh_snapshot(after_stamp_ns).intrinsics, fx=100000.0, fy=100000.0))
     result = flight.forward(context, 30.0)
@@ -184,7 +184,7 @@ def test_real_forward_keeps_strict_rejection(tmp_path: Path, monkeypatch) -> Non
 def test_dispatch_returns_clamp_feedback_in_normal_tool_result(tmp_path: Path, monkeypatch) -> None:
     """超限提议沿原工具分发链返回可读缩短结果，不触发异常终止。"""
     context = forward_context(tmp_path)
-    context.controller.wait_for_observation = lambda *, after_stamp_ns: near_snapshot(after_stamp_ns)
+    context.controller.wait_for_observation = lambda *, after_stamp_ns, view="front": near_snapshot(after_stamp_ns)
     move = Mock(return_value={"success": True, "message": "move complete"})
     monkeypatch.setattr(flight, "move", move)
     call = SimpleNamespace(function=SimpleNamespace(name="forward", arguments=json.dumps({"distance_m": 2.0})))

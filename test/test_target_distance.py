@@ -93,7 +93,7 @@ def test_measurement_never_captures_or_moves_and_requires_observation(tmp_path):
 
 def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, monkeypatch):
     """测量在下一轮可见，转向后再次测量必须先获取新图。"""
-    wait = Mock(side_effect=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns))
+    wait = Mock(side_effect=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns))
     context = context_for(tmp_path, SimpleNamespace(wait_for_observation=wait))
     context.profile = replace(context.profile, post_motion_wait_enabled=False)
     original_dispatch = loop_module.dispatch_tool_call

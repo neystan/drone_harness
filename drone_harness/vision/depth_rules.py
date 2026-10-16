@@ -64,6 +64,8 @@ def invalid_depth_rules(observation_id: str, reason: str) -> DepthRules:
 
 def depth_geometry_error(snapshot: ObservationSnapshot, config: ObservationConfig) -> str:
     """共用同帧深度语义、形状和相机来源校验。"""
+    if snapshot.view == "down":
+        return "FRONT_DEPTH_REQUIRED"
     if snapshot.depth_error:
         return snapshot.depth_error
     if config.depth_semantics != "perspective_ray_m":

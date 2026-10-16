@@ -54,7 +54,7 @@ def test_one_action_keeps_tool_protocol_without_automatic_image(tmp_path: Path, 
     """动作后保留工具结果，但下一轮不会自动附新图。"""
     after_stamps: list[int] = []
 
-    def wait_for_observation(*, after_stamp_ns: int) -> object:
+    def wait_for_observation(*, after_stamp_ns: int, view="front") -> object:
         """返回一张动作后采集的新观测。"""
         after_stamps.append(after_stamp_ns)
         snapshot = snapshot_at()
@@ -91,7 +91,7 @@ def test_one_action_keeps_tool_protocol_without_automatic_image(tmp_path: Path, 
 
 def test_zero_forward_feedback_reaches_next_decision(tmp_path: Path, monkeypatch) -> None:
     """新深度无效时不发布目标点，未移动原因交给下一次决策。"""
-    def wait_for_observation(*, after_stamp_ns: int) -> object:
+    def wait_for_observation(*, after_stamp_ns: int, view="front") -> object:
         """构造采集时间晚于本次零动作的观测。"""
         source = snapshot_at()
         stamp_ns = after_stamp_ns + 60_000_000
@@ -126,7 +126,7 @@ def test_zero_forward_feedback_reaches_next_decision(tmp_path: Path, monkeypatch
 
 def test_successful_nonzero_rotate_resets_no_progress_without_new_frame(tmp_path: Path, monkeypatch) -> None:
     """两次未移动后成功转向可清计数，不再依赖自动新图。"""
-    def wait_for_observation(*, after_stamp_ns: int) -> object:
+    def wait_for_observation(*, after_stamp_ns: int, view="front") -> object:
         """为旋转动作提供一张新采集帧。"""
         source = snapshot_at()
         stamp_ns = after_stamp_ns + 60_000_000
@@ -204,7 +204,7 @@ def test_mismatched_summary_and_rgb_are_rejected(tmp_path: Path) -> None:
 
 def test_long_goal_keeps_at_most_two_images_and_logs_no_base64(tmp_path: Path, monkeypatch) -> None:
     """连续动作时历史和日志均不累积原图数据。"""
-    def wait_for_observation(*, after_stamp_ns: int) -> object:
+    def wait_for_observation(*, after_stamp_ns: int, view="front") -> object:
         """按动作结束时间生成新的合成采集帧。"""
         snapshot = snapshot_at()
         stamp_ns = after_stamp_ns + 60_000_000

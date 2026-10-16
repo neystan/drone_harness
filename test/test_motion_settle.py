@@ -72,7 +72,7 @@ def test_observe_takes_new_frame_only_after_motion_settle(tmp_path, monkeypatch)
         events.append("rotated")
         return {"success": True, "degrees": 30.0}
 
-    def capture(*, after_stamp_ns):
+    def capture(*, after_stamp_ns, view="front"):
         """检查等待已结束，返回调用之后采集的新观测。"""
         assert events == ["rotated", ("sleep", 2.0)]
         events.append("capture")

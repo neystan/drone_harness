@@ -163,6 +163,13 @@ def agent_loop(
             elif context.task_state is not None:
                 context.task_state.completion_candidate = None
             continue
+        if call.function.name == "observe" and not tool_result.get("success"):
+            context.observation = None
+            context.depth_rules = None
+            if context.task_state is not None:
+                context.task_state.clear_observation()
+            _compact_history(messages, keep_latest=False)
+            continue
         if call.function.name == "measure_distance":
             continue
         if not tool_result.get("success"):
@@ -260,7 +267,10 @@ def append_observation(
     log_observation(context.profile, context.session_id, snapshot.observation_id,
                     snapshot.rgb_stamp_ns, snapshot.depth_stamp_ns,
                     rules.depth_valid, rules.forward_max_m, rules.reason,
-                    save_observation_image(context.profile, context.session_id, snapshot.observation_id, message))
+                    save_observation_image(context.profile, context.session_id, snapshot.observation_id, message),
+                    view=snapshot.view,
+                    down_rgb_stamp_ns=(snapshot.down_rgb.stamp_ns if snapshot.down_rgb is not None else
+                                       snapshot.rgb_stamp_ns if snapshot.view == "down" else None))
 
 
 def _assistant_tool_message(message: Any, tool_calls: list[Any]) -> dict[str, Any]:
@@ -276,12 +286,12 @@ def _assistant_tool_message(message: Any, tool_calls: list[Any]) -> dict[str, An
     }
 
 
-def _compact_history(messages: list[dict[str, Any]]) -> None:
-    """完整保留本轮文字和工具记录，仅移除较早观测的图片。"""
+def _compact_history(messages: list[dict[str, Any]], *, keep_latest: bool = True) -> None:
+    """保留最新观察图组，取图失败时移除全部历史图片。"""
     image_messages = [index for index, message in enumerate(messages)
                       if isinstance(message.get("content"), list)
                       and any(part.get("type") == "image_url" for part in message["content"])]
-    for index in image_messages[:-1]:
+    for index in (image_messages[:-1] if keep_latest else image_messages):
         message = messages[index]
         content = [{"type": "text", "text": "历史观测（图片已移除）："}]
         content.extend(part for part in message["content"] if part.get("type") != "image_url")

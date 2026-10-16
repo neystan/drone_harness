@@ -119,6 +119,7 @@ def _start_live_runtime(profile, *, instruction: str | None = None,
         controller = controller_class(
             node_name=profile.ros.node_name,
             camera_scene_topic=profile.ros.camera_scene_topic,
+            camera_down_topic=profile.ros.camera_down_topic,
             camera_depth_topic=profile.ros.camera_depth_topic,
             camera_depth_info_topic=profile.ros.camera_depth_info_topic,
             observation_config=profile.observation,

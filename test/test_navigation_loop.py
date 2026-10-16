@@ -45,7 +45,7 @@ def planning_reply(statuses=("in_progress", "pending")):
 def nav_context(tmp_path):
     """建立无 ROS 的仿真测试上下文。"""
     controller = SimpleNamespace(
-        wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns),
+        wait_for_observation=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns),
         vehicle_status=SimpleNamespace(connected=True, armed=True, mode="AUTO.LOITER"),
         flight_state=lambda: "IN_AIR", current_position_ned=lambda: (0.0, 0.0, -2.0))
     context = context_for(tmp_path, controller)

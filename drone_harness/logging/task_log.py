@@ -128,6 +128,7 @@ def log_observation(
     forward_max_m: float,
     reason: str,
     image_path: str | None = None,
+    *, view: str = "front", down_rgb_stamp_ns: int | None = None,
 ) -> None:
     """只记录观测元数据，不把原始图片或 base64 写入日志。"""
     event = {
@@ -141,6 +142,8 @@ def log_observation(
         "forward_max_m": forward_max_m,
         "reason": reason,
         "image_path": image_path,
+        "view": view,
+        "down_rgb_stamp_ns": down_rgb_stamp_ns,
     }
     try:
         append_jsonl(str(_session_log_dir(profile, session_id)), "observations.jsonl", event)

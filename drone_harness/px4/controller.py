@@ -118,6 +118,7 @@ class Px4Controller(Node):
         camera_depth_info_topic: str | None = None,
         observation_config: ObservationConfig | None = None,
         observation_clock_topic: str | None = None,
+        camera_down_topic: str | None = None,
     ) -> None:
         """初始化 MAVROS topic、service、状态缓存和 setpoint 定时器。"""
         super().__init__(node_name)
@@ -193,6 +194,9 @@ class Px4Controller(Node):
                 self.rgb_image_callback,
                 qos_profile_sensor_data,
             )
+        if camera_down_topic:
+            self.create_subscription(Image, camera_down_topic, self.down_rgb_image_callback,
+                                     qos_profile_sensor_data)
         if camera_depth_topic:
             self.create_subscription(
                 Image,
@@ -379,6 +383,17 @@ class Px4Controller(Node):
         except Exception as exc:
             self.get_logger().error(f"Failed to convert depth image: {exc}")
 
+    def down_rgb_image_callback(self, msg: Image) -> None:
+        """把下视 RGB 存入独立视角缓存，不触发前视深度配对。"""
+        if self.observation_buffer is None:
+            return
+        try:
+            self.observation_buffer.add_rgb(
+                self.bridge.imgmsg_to_cv2(msg, "bgr8"), ros_stamp_ns(msg.header.stamp),
+                str(msg.header.frame_id), view="down")
+        except Exception as exc:
+            self.get_logger().error(f"Failed to convert down RGB image: {exc}")
+
     def depth_camera_info_callback(self, msg: CameraInfo) -> None:
         """校验并缓存与深度图同源的针孔内参。"""
         if self.observation_buffer is None:
@@ -410,11 +425,12 @@ class Px4Controller(Node):
         self,
         after_stamp_ns: int = 0,
         timeout_s: float | None = None,
+        *, view: str = "front",
     ) -> ObservationSnapshot | None:
-        """等待动作后采集的新观测，保持 setpoint 定时器独立运行。"""
+        """等待所选视角的新图，保持 setpoint 定时器独立运行。"""
         if self.observation_buffer is None:
             return None
-        snapshot = self.observation_buffer.wait_for_snapshot(after_stamp_ns, timeout_s)
+        snapshot = self.observation_buffer.wait_for_snapshot(after_stamp_ns, timeout_s, view=view)
         return self._attach_flight_state(snapshot)
 
     def _attach_flight_state(self, snapshot: ObservationSnapshot | None) -> ObservationSnapshot | None:

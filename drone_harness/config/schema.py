@@ -17,6 +17,7 @@ class RosConfig:
     mavros_namespace: str = "/mavros"
     mavros_fcu_url: str = ""
     observation_clock_topic: str | None = None
+    camera_down_topic: str | None = None
 
     def __post_init__(self) -> None:
         """校验 ROS 配置中的必填字段。"""

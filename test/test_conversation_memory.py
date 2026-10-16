@@ -20,7 +20,7 @@ def test_scene_description_survives_next_user_turn_without_tool_records(tmp_path
     bus = SimpleNamespace(consume_user_message=lambda: SimpleNamespace(content=next(inputs)),
                           has_pending_user_message=lambda: False)
     context = context_for(tmp_path, SimpleNamespace(
-        wait_for_observation=lambda *, after_stamp_ns: fresh_snapshot(after_stamp_ns)))
+        wait_for_observation=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns)))
     context.message_bus = bus
     monkeypatch.setattr(flight, "rotate", Mock(return_value={"success": True, "degrees": 30}))
     scene = "观察：左前方有十字路口，红色店招在路口右侧。"

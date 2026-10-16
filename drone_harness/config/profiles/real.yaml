@@ -6,6 +6,7 @@ post_motion_wait_s: 2.0  # 等待秒数，可直接修改。
 ros:
   node_name: drone_harness_real
   camera_scene_topic: null
+  camera_down_topic: null
   camera_depth_topic: null
   camera_depth_info_topic: null
 

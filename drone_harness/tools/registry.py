@@ -93,11 +93,15 @@ def _get_state_handler(context: ToolContext, _arguments: dict[str, Any]) -> dict
 
 
 def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
-    """按模型提示取一组新 RGB-D，只返回脱敏元数据。"""
+    """按视角选择取新图组，前视附配对深度，下视只需 RGB。"""
     context.observation = None
     context.depth_rules = None
     if context.task_state is not None:
         context.task_state.clear_observation()
+    view = arguments.get("view", "front")
+    if not isinstance(view, str) or view not in {"front", "down", "both"}:
+        return {"success": False, "error": "INVALID_OBSERVE_VIEW",
+                "message": "view 必须为 front、down 或 both"}
     prompt = arguments.get("prompt")
     if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 1000:
         return {"success": False, "error": "INVALID_OBSERVE_PROMPT",
@@ -108,7 +112,7 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
                 "message": "当前控制器没有可用的 RGB-D 观测接口"}
     try:
         started_ns = observation_request_time_ns(context.controller)
-        snapshot = wait_for_observation(after_stamp_ns=started_ns)
+        snapshot = wait_for_observation(after_stamp_ns=started_ns, view=view)
     except Exception as exc:
         return {"success": False, "error": "OBSERVATION_FAILED",
                 "message": f"获取 RGB-D 失败：{type(exc).__name__}"}
@@ -116,6 +120,11 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     try:
         rgb_ready = (
             snapshot is not None
+            and snapshot.view == view
+            and (view != "both" or (snapshot.down_rgb is not None
+                 and snapshot.down_rgb.stamp_ns > threshold_ns
+                 and abs(snapshot.down_rgb.stamp_ns - snapshot.rgb_stamp_ns)
+                     <= context.profile.observation.max_sync_delta_s * 1e9))
             and isinstance(snapshot.observation_id, str)
             and bool(snapshot.observation_id)
             and isinstance(snapshot.rgb_stamp_ns, int)
@@ -127,7 +136,7 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
         rgb_ready = False
     if not rgb_ready:
         return {"success": False, "error": "OBSERVATION_UNAVAILABLE",
-                "message": "没有采集于本次 observe 调用之后的新 RGB 图像"}
+                "message": f"未取得 {view} 请求视角的新鲜且时间匹配图像"}
     try:
         rules = compute_depth_rules(snapshot, context.profile.observation,
                                     context.profile.forward_step_limit_m)
@@ -135,7 +144,7 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
         rules = invalid_depth_rules(snapshot.observation_id, f"DEPTH_PARSE_{type(exc).__name__}")
     context.observation = snapshot
     context.depth_rules = rules
-    return {"success": True, "prompt": prompt.strip(),
+    return {"success": True, "prompt": prompt.strip(), "view": view,
             "observation_id": snapshot.observation_id,
             "depth_valid": rules.depth_valid,
             "forward_max_m": rules.forward_max_m,

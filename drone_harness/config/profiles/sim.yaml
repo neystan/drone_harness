@@ -6,6 +6,7 @@ post_motion_wait_s: 2.0  # 等待秒数，可直接修改。
 ros:
   node_name: drone_harness_sim
   camera_scene_topic: /airsim_node/PX4/CameraDepth1/Scene
+  camera_down_topic: /airsim_node/PX4/CameraDown/Scene
   camera_depth_topic: /airsim_node/PX4/CameraDepth1/DepthPerspective
   camera_depth_info_topic: /airsim_node/PX4/CameraDepth1/DepthPerspective/camera_info
   observation_clock_topic: /airsim_node/PX4/odom_local_ned  # 只读取 header 中的仿真时间。

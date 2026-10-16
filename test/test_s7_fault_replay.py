@@ -52,7 +52,7 @@ def test_depth_faults_issue_no_forward_setpoint(
         context.profile = replace(context.profile, observation=replace(
             context.profile.observation, depth_semantics="unverified"))
 
-    def wait_for_observation(*, after_stamp_ns: int):
+    def wait_for_observation(*, after_stamp_ns: int, view="front"):
         """把各类故障注入本次 forward 新取得的深度帧。"""
         snapshot = fresh_snapshot(after_stamp_ns)
         if fault == "depth_missing":
@@ -117,7 +117,7 @@ def test_bad_model_reply_stops_without_dispatch_and_confirms_hover(
 
 
 @pytest.mark.parametrize("fault", ["missing", "not_new"])
-def test_explicit_observe_failure_stops_without_reusing_old_image(
+def test_explicit_observe_failure_reaches_model_without_reusing_old_image(
     tmp_path: Path, monkeypatch, fault: str,
 ) -> None:
     """动作后不自动取图；主动观察失败时旧图不能续用。"""
@@ -130,7 +130,8 @@ def test_explicit_observe_failure_stops_without_reusing_old_image(
     observe_call = SimpleNamespace(id="observe-2", function=SimpleNamespace(
         name="observe", arguments='{"prompt":"查看新位置"}'))
     client = FakeClient([SimpleNamespace(content="", tool_calls=[fake_call("rotate")]),
-                         SimpleNamespace(content="", tool_calls=[observe_call])])
+                         SimpleNamespace(content="", tool_calls=[observe_call]),
+                         SimpleNamespace(content="请重新选择视角观察", tool_calls=[])])
     original_dispatch = loop_module.dispatch_tool_call
 
     def dispatch(current, call):
@@ -143,7 +144,9 @@ def test_explicit_observe_failure_stops_without_reusing_old_image(
     monkeypatch.setattr(loop_module, "dispatch_tool_call", dispatch)
     monkeypatch.setattr(loop_module, "request_confirmed_hover", hover)
 
-    assert "observe 未成功" in agent_loop(client, "test-vlm", messages, context)
-    assert len(client.requests) == 2
-    hover.assert_called_once()
+    assert "重新选择视角" in agent_loop(client, "test-vlm", messages, context)
+    assert len(client.requests) == 3
+    hover.assert_not_called()
+    assert not any(part.get("type") == "image_url" for message in client.requests[-1]
+                   if isinstance(message.get("content"), list) for part in message["content"])
     assert context.observation is None
