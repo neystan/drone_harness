@@ -87,6 +87,12 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 核验边界：当前启动设置中的相机为前视，原地四向采图不能直接证明正下方、屋顶中央或下方着陆区。已有 RGB-D 和内参可作为后续目标区域测距的基础，但当前对模型只返回障碍净空摘要，尚未实现目标区域定位、对应深度、完整采图位姿绑定或语义完成验证。目标外观/关系/路线核对、动作前后证据和局部几何核验均为讨论建议，搜索实现范围与接口仍未定稿。
 
+2026-10-16 后续调研：用户提出下视 RGB，继续讨论建筑/店铺的目标身份、接近距离与位置关系；尚未批准相机或测距改造。已阅读 [VLFM 目标点云代码](https://github.com/rai-opensource/vlfm/blob/main/vlfm/mapping/object_point_cloud_map.py)、[VLMaps 几何关系代码](https://github.com/vlmaps/vlmaps/blob/master/vlmaps/map/map.py)、[GOAT 实例记忆说明](https://theophilegervet.github.io/projects/goat/)、[Nav2 停止到达检查](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/core_servers/controller_server/controller_server_plugins/stopped_goal_checker/)及 Isaac ROS FoundationPose 官方接口。详细调研记录在桌面“仿真批量测试.md”，未安装或运行这些系统。
+
+可借鉴的分工是目标区域深度/点云测量、跨视角实例对应、将空间关系转换为几何目标、位置/朝向/停止状态分别检查。VLFM 按类别累积点云并依赖检测/分割模型；GOAT 与 VLMaps 依赖地图或实例记忆；Isaac ROS FoundationPose 接口需要目标网格等输入。这些地面导航或物体位姿方案不直接证明本项目的指定建筑入口、屋顶范围和三维飞越。仅使用主 VLM 选框或选点是简化讨论方向，尚未证明可达到专门分割与几何处理的效果；地图、多模型及新依赖均未成为实施决定。
+
+用户随后明确不使用目标检测模型，并要求不能进一步拖慢导航。当前讨论据此保持单 VLM，借鉴区域几何、实例对应及完成条件的分工，避免引入独立检测/分割模型。低延迟接口建议是在原本模型回复中附目标选点/小区域，由工具执行层复用配对深度完成测量和动作限幅，测量随原工具反馈返回；不单独增加“测距后再问模型”的轮次。该接口尚未实施，目标选区质量、实际耗时和各类空间关系的覆盖范围均未验证，不能将方案描述为零开销或通用到达证明。
+
 当前本机配置在 2026-10-12 只读检查时使用 `glm-5.3-flash`；模型可能随本地设置变化，不把它硬编码成项目要求。[智谱官方文档](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash) 支持多图内容块，但本项目四图请求、效果和耗时尚未实际验证。
 
 用户已明确移除先前清单中的“调整时限”和“分阶段验证”，也不开展图片归档、局部放大建议。不要把它们重新加入本轮工作。此前 10 分钟搜索预算以及升高 2 米/累计 6 米均未成为实施决定。
