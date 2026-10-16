@@ -352,7 +352,8 @@ def build_observation_message(
         raise ValueError("RGB JPEG encoding failed or exceeded byte limit")
     data_url = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
     focus = f"观察重点：{prompt}\n" if prompt else ""
-    summary = focus + rules.as_text()
+    height, width = snapshot.rgb.shape[:2]
+    summary = focus + f"前视图尺寸：{width}×{height}；测距选点使用左上原点的 0 到 1 归一化坐标。\n" + rules.as_text()
     return {
         "role": "user",
         "content": [

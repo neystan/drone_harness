@@ -62,6 +62,32 @@ def invalid_depth_rules(observation_id: str, reason: str) -> DepthRules:
     )
 
 
+def depth_geometry_error(snapshot: ObservationSnapshot, config: ObservationConfig) -> str:
+    """共用同帧深度语义、形状和相机来源校验。"""
+    if snapshot.depth_error:
+        return snapshot.depth_error
+    if config.depth_semantics != "perspective_ray_m":
+        return "DEPTH_SEMANTICS_UNVERIFIED"
+    if snapshot.depth is None or snapshot.intrinsics is None:
+        return "DEPTH_OR_INTRINSICS_MISSING"
+    if snapshot.depth_encoding != "32FC1":
+        return "DEPTH_ENCODING_UNSUPPORTED"
+    depth = np.asarray(snapshot.depth)
+    intrinsics = snapshot.intrinsics
+    if depth.dtype != np.float32 or depth.ndim != 2:
+        return "DEPTH_ARRAY_INVALID"
+    if depth.shape != (intrinsics.height, intrinsics.width) or snapshot.rgb.shape[:2] != depth.shape:
+        return "RGB_DEPTH_GEOMETRY_MISMATCH"
+    frame_names = (
+        snapshot.rgb_frame_id.split("/")[-1],
+        (snapshot.depth_frame_id or "").split("/")[-1],
+        intrinsics.frame_id.split("/")[-1],
+    )
+    if not frame_names[0] or len(set(frame_names)) != 1:
+        return "RGB_DEPTH_CAMERA_MISMATCH"
+    return ""
+
+
 def compute_depth_rules(
     snapshot: ObservationSnapshot,
     config: ObservationConfig,
@@ -69,27 +95,11 @@ def compute_depth_rules(
 ) -> DepthRules:
     """由透视射线测距计算前缘净空，失效时不推断可飞距离。"""
     observation_id = snapshot.observation_id
-    if snapshot.depth_error:
-        return invalid_depth_rules(observation_id, snapshot.depth_error)
-    if config.depth_semantics != "perspective_ray_m":
-        return invalid_depth_rules(observation_id, "DEPTH_SEMANTICS_UNVERIFIED")
-    if snapshot.depth is None or snapshot.intrinsics is None:
-        return invalid_depth_rules(observation_id, "DEPTH_OR_INTRINSICS_MISSING")
-    if snapshot.depth_encoding != "32FC1":
-        return invalid_depth_rules(observation_id, "DEPTH_ENCODING_UNSUPPORTED")
+    error = depth_geometry_error(snapshot, config)
+    if error:
+        return invalid_depth_rules(observation_id, error)
     depth = np.asarray(snapshot.depth)
     intrinsics = snapshot.intrinsics
-    if depth.dtype != np.float32 or depth.ndim != 2:
-        return invalid_depth_rules(observation_id, "DEPTH_ARRAY_INVALID")
-    if depth.shape != (intrinsics.height, intrinsics.width) or snapshot.rgb.shape[:2] != depth.shape:
-        return invalid_depth_rules(observation_id, "RGB_DEPTH_GEOMETRY_MISMATCH")
-    frame_names = (
-        snapshot.rgb_frame_id.split("/")[-1],
-        (snapshot.depth_frame_id or "").split("/")[-1],
-        intrinsics.frame_id.split("/")[-1],
-    )
-    if not frame_names[0] or len(set(frame_names)) != 1:
-        return invalid_depth_rules(observation_id, "RGB_DEPTH_CAMERA_MISMATCH")
     if (
         isinstance(profile_max_step_m, bool)
         or not isinstance(profile_max_step_m, (int, float))

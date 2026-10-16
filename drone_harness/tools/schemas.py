@@ -122,6 +122,25 @@ OBSERVE_TOOL_SCHEMA = {
     },
 }
 
+MEASURE_DISTANCE_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "measure_distance",
+        "description": "按需测量最新前视观察中所选可见表面。动作后先重新 observe；只读配对深度，不移动。返回相机射线距离与有效性，不证明目标身份或到达。",
+        "parameters": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "x": {"type": "number", "minimum": 0, "maximum": 1,
+                      "description": "图像左侧为 0、右侧为 1；选择目标实体表面内部，避开边缘和门洞。"},
+                "y": {"type": "number", "minimum": 0, "maximum": 1,
+                      "description": "图像顶部为 0、底部为 1。"},
+            },
+            "required": ["x", "y"],
+        },
+    },
+}
+
+
 GET_STATE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
@@ -137,6 +156,7 @@ GET_STATE_TOOL_SCHEMA = {
 
 TOOL_SCHEMAS = [
     OBSERVE_TOOL_SCHEMA,
+    MEASURE_DISTANCE_TOOL_SCHEMA,
     GET_STATE_TOOL_SCHEMA,
     TAKEOFF_TOOL_SCHEMA,
     FORWARD_TOOL_SCHEMA,

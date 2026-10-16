@@ -11,6 +11,7 @@ from drone_harness.runtime.navigation import NavigationPlan, update_navigation_p
 from drone_harness.runtime.observation import ObservationSnapshot, observation_request_time_ns
 from drone_harness.runtime.task_state import TaskState
 from drone_harness.vision.depth_rules import DepthRules, compute_depth_rules, invalid_depth_rules
+from drone_harness.vision.target_distance import measure_target_distance
 from . import flight
 from .state import get_state
 from .schemas import (
@@ -20,6 +21,7 @@ from .schemas import (
     GET_STATE_TOOL_SCHEMA,
     LAND_TOOL_SCHEMA,
     OBSERVE_TOOL_SCHEMA,
+    MEASURE_DISTANCE_TOOL_SCHEMA,
     ROTATE_TOOL_SCHEMA,
     TAKEOFF_TOOL_SCHEMA,
     UP_TOOL_SCHEMA,
@@ -141,8 +143,15 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
             "message": "已取得当前图像与深度摘要"}
 
 
+def _measure_distance_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
+    """只测量模型已看到且尚未因动作失效的前视观察。"""
+    return measure_target_distance(context.observation, context.profile.observation,
+                                   arguments.get("x"), arguments.get("y"))
+
+
 TOOL_DEFINITIONS = [
     ToolDefinition("observe", OBSERVE_TOOL_SCHEMA, _observe_handler),
+    ToolDefinition("measure_distance", MEASURE_DISTANCE_TOOL_SCHEMA, _measure_distance_handler),
     ToolDefinition("get_state", GET_STATE_TOOL_SCHEMA, _get_state_handler),
     ToolDefinition("takeoff", TAKEOFF_TOOL_SCHEMA, _takeoff_handler),
     ToolDefinition("forward", FORWARD_TOOL_SCHEMA, _forward_handler),

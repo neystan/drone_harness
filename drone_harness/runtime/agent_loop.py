@@ -163,6 +163,8 @@ def agent_loop(
             elif context.task_state is not None:
                 context.task_state.completion_candidate = None
             continue
+        if call.function.name == "measure_distance":
+            continue
         if not tool_result.get("success"):
             if recoverable:
                 corrections += 1

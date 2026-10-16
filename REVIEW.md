@@ -25,7 +25,8 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 执行链：用户指令 → runtime / agent_loop → 同一个 VLM → tool_dispatcher → 飞行工具 / Px4Controller → 工具反馈 → VLM 继续规划。
 
-- 当前正式 sim/real 入口有九个工具：`observe`、`get_state`、`takeoff`、`forward`、`up`、`down`、`rotate`、`land`、`update_navigation_plan`。
+- 当前正式 sim/real 入口有十个工具：`measure_distance`、`observe`、`get_state`、`takeoff`、`forward`、`up`、`down`、`rotate`、`land`、`update_navigation_plan`。
+- `measure_distance(x, y)` 按需读取最新前视观察的 5×5 深度邻域，归一化坐标选点，返回可见表面射线距离与质量。校验同帧来源与时间，拒绝无效、量程外或明显混杂深度；不新取图或移动，动作后需重新观察。
 - `observe(prompt)` 按需提供 RGB 与配对深度摘要；新任务和动作后不自动附图。动作后再观察目前主要靠提示词引导。
 - 模型上下文最多保留最新一张观察图；四图扫描尚未实现。当前子目标完成后清理旧工具协议与旧观察派生文字，保留用户/AI 自然语言、最新图及当前计划信息。
 - 计划由同一个 VLM 创建和更新；程序做结构校验，不独立核验每个地标是否到达。模型打勾不等于导航评分成功。
@@ -75,6 +76,9 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 ## 本轮讨论结论
 
+2026-10-17 已完成 STATUS.md 第 4 项选点测距：当前工具数为十个，深度几何校验由前进规则与局部测量共用。5×5 邻域至少 80% 有效，20 米量程内取中位数，P90−P10 和中心偏差用 max(0.3 米, 中位数 5%) 检查；无可靠测量时返回未知供主 VLM 决策。98 项相关离线测试通过，未启动仿真或请求真实模型；导航选点效果与实际延迟未验证。下文旧讨论中的“尚未实现测距”描述当时状态，以本段和 STATUS.md 为当前基准。
+
+
 2026-10-17 用户确认将最小搜索闭环分别登记为 STATUS.md 第 2 项“skill”和第 6 项“疑点反问”。skill 原地采集前、左、后、右四图，恢复开始朝向，由同一个 VLM 联合判断，四图仅在 skill 内使用。疑点反问由主 VLM 填写 `target_status=confirmed/uncertain/not_found`，据此继续导航或复用 `observe(prompt)` 带问题核实；字段存放与输出接口仍需细化。确认参照物不自动完成子目标，现有计划与 `evidence` 继续复用；没有新增候选表、自动追踪或几何核验。本轮只登记待办，业务能力尚未实现，未启动仿真或请求真实模型。
 
 用户希望以最小改动改善启动可靠性、目标搜索和完成判断。当前任务以 STATUS.md 为准；2026-10-16 已将按需测距与前下双视图分别列为第 4、5 项独立待办。
@@ -89,7 +93,7 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 详细表格与讨论见桌面“仿真批量测试.md”；逐条原文、标签、命中依据、汇总与可复跑脚本位于 `../drone_harness_runtime/analysis/20261016-case-taxonomy/`。仅完成文本与代码分析，没有检查 489 条对应的完整视觉过程、启动仿真或请求真实模型。原始终点、参考轨迹及同轨迹其他描述仍只作离线分析与独立评测材料，不提供给运行中的 VLM。
 
-核验边界：当前启动设置中的相机为前视，原地四向采图不能直接证明正下方、屋顶中央或下方着陆区。已有 RGB-D 和内参可作为后续目标区域测距的基础，但当前对模型只返回障碍净空摘要，尚未实现目标区域定位、对应深度、完整采图位姿绑定或语义完成验证。目标外观/关系/路线核对、动作前后证据和局部几何核验均为讨论建议，搜索实现范围与接口仍未定稿。
+核验边界：当前启动设置中的相机为前视，原地四向采图不能直接证明正下方、屋顶中央或下方着陆区。已有 RGB-D 和内参可作为后续目标区域测距的基础，但当前已新增前视选点配对深度测量；完整目标区域、采图位姿绑定与语义完成验证仍未实现。目标外观/关系/路线核对、动作前后证据和局部几何核验均为讨论建议，搜索实现范围与接口仍未定稿。
 
 2026-10-16 后续调研：用户提出下视 RGB，继续讨论建筑/店铺的目标身份、接近距离与位置关系；下视相机与测距的后续约定见下文。已阅读 [VLFM 目标点云代码](https://github.com/rai-opensource/vlfm/blob/main/vlfm/mapping/object_point_cloud_map.py)、[VLMaps 几何关系代码](https://github.com/vlmaps/vlmaps/blob/master/vlmaps/map/map.py)、[GOAT 实例记忆说明](https://theophilegervet.github.io/projects/goat/)、[Nav2 停止到达检查](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/core_servers/controller_server/controller_server_plugins/stopped_goal_checker/)及 Isaac ROS FoundationPose 官方接口。详细调研记录在桌面“仿真批量测试.md”，未安装或运行这些系统。
 
