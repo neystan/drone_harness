@@ -87,11 +87,13 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 核验边界：当前启动设置中的相机为前视，原地四向采图不能直接证明正下方、屋顶中央或下方着陆区。已有 RGB-D 和内参可作为后续目标区域测距的基础，但当前对模型只返回障碍净空摘要，尚未实现目标区域定位、对应深度、完整采图位姿绑定或语义完成验证。目标外观/关系/路线核对、动作前后证据和局部几何核验均为讨论建议，搜索实现范围与接口仍未定稿。
 
-2026-10-16 后续调研：用户提出下视 RGB，继续讨论建筑/店铺的目标身份、接近距离与位置关系；尚未批准相机或测距改造。已阅读 [VLFM 目标点云代码](https://github.com/rai-opensource/vlfm/blob/main/vlfm/mapping/object_point_cloud_map.py)、[VLMaps 几何关系代码](https://github.com/vlmaps/vlmaps/blob/master/vlmaps/map/map.py)、[GOAT 实例记忆说明](https://theophilegervet.github.io/projects/goat/)、[Nav2 停止到达检查](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/core_servers/controller_server/controller_server_plugins/stopped_goal_checker/)及 Isaac ROS FoundationPose 官方接口。详细调研记录在桌面“仿真批量测试.md”，未安装或运行这些系统。
+2026-10-16 后续调研：用户提出下视 RGB，继续讨论建筑/店铺的目标身份、接近距离与位置关系；下视相机仍未决定实施，测距的后续约定见下文。已阅读 [VLFM 目标点云代码](https://github.com/rai-opensource/vlfm/blob/main/vlfm/mapping/object_point_cloud_map.py)、[VLMaps 几何关系代码](https://github.com/vlmaps/vlmaps/blob/master/vlmaps/map/map.py)、[GOAT 实例记忆说明](https://theophilegervet.github.io/projects/goat/)、[Nav2 停止到达检查](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/core_servers/controller_server/controller_server_plugins/stopped_goal_checker/)及 Isaac ROS FoundationPose 官方接口。详细调研记录在桌面“仿真批量测试.md”，未安装或运行这些系统。
 
 可借鉴的分工是目标区域深度/点云测量、跨视角实例对应、将空间关系转换为几何目标、位置/朝向/停止状态分别检查。VLFM 按类别累积点云并依赖检测/分割模型；GOAT 与 VLMaps 依赖地图或实例记忆；Isaac ROS FoundationPose 接口需要目标网格等输入。这些地面导航或物体位姿方案不直接证明本项目的指定建筑入口、屋顶范围和三维飞越。仅使用主 VLM 选框或选点是简化讨论方向，尚未证明可达到专门分割与几何处理的效果；地图、多模型及新依赖均未成为实施决定。
 
-用户随后明确不使用目标检测模型，并要求不能进一步拖慢导航。当前讨论据此保持单 VLM，借鉴区域几何、实例对应及完成条件的分工，避免引入独立检测/分割模型。低延迟接口建议是在原本模型回复中附目标选点/小区域，由工具执行层复用配对深度完成测量和动作限幅，测量随原工具反馈返回；不单独增加“测距后再问模型”的轮次。该接口尚未实施，目标选区质量、实际耗时和各类空间关系的覆盖范围均未验证，不能将方案描述为零开销或通用到达证明。
+用户随后明确不使用目标检测模型，并要求控制延迟，继续保持单 VLM。后续已接受按需独立测距：只有需要目标距离时调用拟名 `measure_distance` 的工具，主 VLM 读取工具结果后再决定动作，因此该路径增加测距工具调用及相应后续模型请求；替代此前将测量与动作合并的建议。
+
+2026-10-16 已认可“VLM 选点、程序取周围小区域”的方式：复用模型所见同一帧的配对深度，过滤无效值后做中位数汇总，深度分歧明显或有效样本不足时报告不可靠。拟返回相机到选定可见表面的射线距离和有效性，不把它直接作为水平航程、目标中心距离或通用到达证明。坐标约定、邻域尺寸与质量阈值仍需核对；当前仅完成方案整理，测距工具、动作后失效处理和针对性离线测试尚未实现，实际选点效果与延迟未验证。
 
 2026-10-16 论文启发讨论后的范围确认：用户同意带问题观察，要求四图联合判断仅用于搜索 skill；来源标注、候选结构化记录、旋转/移动后的实例重新辨认及提示词调整仍待评估。现有 `evidence` 已是计划字段，候选检查记录如何保存没有定稿。观察来源只说明拍摄位置、朝向和时间，不能自动给出目标坐标或保证跨视角跟踪；普通导航最新一图的边界不因本次讨论自动扩大。仅做分析与范围记录，没有实现或获得新的仿真效果。
 
