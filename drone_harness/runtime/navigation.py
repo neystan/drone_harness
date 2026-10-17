@@ -10,6 +10,7 @@ from drone_harness.llm.prompts import (
     LANDMARK_OBSERVATION_PROMPT, NAVIGATION_EXECUTION_PROMPT,
     PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
 )
+from drone_harness.runtime.reflection import discard_stale_target_assessment
 
 
 @dataclass
@@ -135,6 +136,7 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
     compact = changed and current_subgoal_completed(old, plan)
     if changed:
         context.navigation_plan = plan
+        discard_stale_target_assessment(context)
         from drone_harness.logging.task_log import log_navigation_plan
 
         log_navigation_plan(context.profile, context.session_id, "created" if old is None else "updated", plan)

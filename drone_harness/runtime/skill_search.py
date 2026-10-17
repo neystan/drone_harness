@@ -7,6 +7,7 @@ from typing import Any
 
 from drone_harness.logging.task_log import log_observation, save_observation_image
 from drone_harness.runtime.observation import encode_observation_image
+from drone_harness.runtime.reflection import clear_target_assessment
 from drone_harness.skills import load_skills
 
 
@@ -42,6 +43,7 @@ def _clear_observation(context: Any) -> None:
     """动作及扫描结束后清除当前位置的观察和测距缓存。"""
     context.observation = None
     context.depth_rules = None
+    clear_target_assessment(context)
     if context.task_state is not None:
         context.task_state.clear_observation()
 

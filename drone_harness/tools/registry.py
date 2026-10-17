@@ -10,6 +10,7 @@ from drone_harness.config.schema import RuntimeProfile
 from drone_harness.runtime.navigation import NavigationPlan, update_navigation_plan
 from drone_harness.runtime.observation import ObservationSnapshot, observation_request_time_ns
 from drone_harness.runtime.task_state import TaskState
+from drone_harness.runtime.reflection import clear_target_assessment
 from drone_harness.vision.depth_rules import DepthRules, compute_depth_rules, invalid_depth_rules
 from drone_harness.vision.target_distance import measure_target_distance
 from . import flight
@@ -48,6 +49,8 @@ class ToolContext:
     navigation_instruction: str = ""
     navigation_resumable: bool = True
     search_observations: list[ObservationSnapshot] | None = None
+    target_assessment: dict[str, str] | None = None
+    target_assessment_goal: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,7 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     """按视角选择取新图组，前视附配对深度，下视只需 RGB。"""
     context.observation = None
     context.depth_rules = None
+    clear_target_assessment(context)
     if context.task_state is not None:
         context.task_state.clear_observation()
     view = arguments.get("view", "front")

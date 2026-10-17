@@ -249,6 +249,8 @@ def _run_interactive_loop(
                 log_navigation_plan(context.profile, context.session_id, "cancelled", context.navigation_plan)
             context.navigation_plan = None
             context.navigation_resumable = False
+            context.target_assessment = None
+            context.target_assessment_goal = None
             # 明确取消或替换时隔离旧任务对话，避免模型从旧文字自行恢复。
             conversation.clear()
             if directive == "cancel":

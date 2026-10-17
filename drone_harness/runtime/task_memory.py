@@ -1,6 +1,7 @@
 """处理任务续接和可纠正拒绝，不恢复旧图或动作授权。"""
 
 from typing import Any
+from drone_harness.runtime.reflection import clear_target_assessment
 
 
 def is_recoverable_rejection(tool: str, result: dict[str, Any]) -> bool:
@@ -27,6 +28,7 @@ def prepare_navigation_turn(context: Any, user_input: str, *, replace_task: bool
               and plan is not None and plan.status in {"running", "finishing", "incomplete"})
     context.observation = None
     context.depth_rules = None
+    clear_target_assessment(context)
     if resume:
         plan.status = "finishing" if plan.completed_count == len(plan.subgoals) else "running"
         plan.stop_reason = ""

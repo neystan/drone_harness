@@ -17,7 +17,10 @@ from drone_harness.runtime.navigation import (
 )
 from drone_harness.runtime.observation import ObservationSnapshot, build_observation_message
 from drone_harness.runtime.safety import EndCurrentTurn, SafetyHandoffRequired, request_confirmed_hover
-from drone_harness.runtime.skill_search import build_search_message, clear_search_images
+from drone_harness.runtime.skill_search import SEARCH_MARKER, build_search_message, clear_search_images
+from drone_harness.runtime.reflection import (
+    clear_target_assessment, discard_stale_target_assessment, record_target_assessment,
+)
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.runtime.task_memory import is_recoverable_rejection
 from drone_harness.runtime.tool_dispatcher import dispatch_tool_call
@@ -60,6 +63,7 @@ def _run_agent_loop(
     requests = 0
     corrections = 0
     while True:
+        discard_stale_target_assessment(context)
         plan = context.navigation_plan
         request_limit = MAX_NAVIGATION_REQUESTS if plan is not None else MAX_TOOL_CALLS_PER_TURN
         if requests >= request_limit:
@@ -72,6 +76,11 @@ def _run_agent_loop(
                 return _stop_with_message(context, interruption["message"], safety_stop=True)
         _record_task_state(context, "thinking")
         requests += 1
+        has_current_image = _navigation_observation_current(context) or any(
+            isinstance(item.get("content"), list)
+            and any(part.get("type") == "image_url" for part in item["content"])
+            and item["content"][0].get("text", "").startswith(SEARCH_MARKER)
+            for item in messages)
         try:
             response = client.chat.completions.create(
                 model=model,
@@ -99,6 +108,7 @@ def _run_agent_loop(
         assistant_text = message.content or ""
         if not isinstance(assistant_text, str):
             return _stop_with_message(context, "模型文本响应结构无效，已停止本轮。", safety_stop=True)
+        record_target_assessment(context, assistant_text, has_current_image=has_current_image)
         display_text = assistant_text
         messages.append(_assistant_tool_message(message, tool_calls) if tool_calls else
                         {"role": "assistant", "content": assistant_text})
@@ -156,6 +166,7 @@ def _run_agent_loop(
                            "recovery_hint": "未发布本次位置目标；请结合状态纠正参数或选择其他工具。"}
         view_changed = bool(tool_result.get("success")) and _motion_changed_view(call.function.name, tool_result)
         if view_changed:
+            clear_target_assessment(context)
             if context.profile.post_motion_wait_enabled:
                 # 仅暂停规划线程，ROS executor 继续收数据、发布 setpoint。
                 wait_s = context.profile.post_motion_wait_s

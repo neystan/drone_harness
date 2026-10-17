@@ -34,9 +34,18 @@ PROXIMITY_COMPLETION_PROMPT = """接近核验：前视确认目标及要求的�
 """
 
 
+REFLECTION_PROMPT = """反思：普通观察与四向搜索共用以下规则。收到新图并判断导航参照物时，对照原始任务、当前子目标和实际动作，核对外观、邻近关系与路线顺序，区分支持证据、缺失的关键条件和明显矛盾。
+在同一次回复开头输出一行JSON：{"target_status":"confirmed|uncertain|not_found","message":"判断依据"}，不加代码围栏；随后继续描述视觉细节，并按需调用一个原生工具，勿为了输出判断单独结束回复或增加检查轮次。
+confirmed表示证据足以支持目标身份；uncertain表示有候选但关键证据不足，在message说明缺口；not_found表示本次没有符合要求的候选，不代表目标不存在。四向搜索发现候选时在message说明相对开始朝向的方向。
+例如任务要求“仓库旁的红色卡车”：仓库特征及邻近关系清晰则confirmed；红色卡车旁是明确不符的住宅则排除该候选，没有其他候选时not_found；邻近建筑被遮挡则uncertain，说明还缺建筑及位置关系证据。
+证据充分直接继续；需要新证据才调整视角并用observe.prompt提出具体观察重点，例如“描述卡车旁建筑的特征及两者位置关系”，避免只追问“是不是目标”。仍看不清就保留存疑，不因复查过一次就确认，不重复拿相同图片追问。
+target_status只表达本次判断，不自动要求复查、调用搜索或重复扫描；发现相似物不等于确认指定实例，确认身份也不等于到达或完成子目标。动作和子目标变化后依据新观察重新判断。
+"""
+
+
 def build_system_prompt(profile: RuntimeProfile) -> str:
     """生成基础行为规则，仅为实机补充逐动作审批要求。"""
-    prompt = SYSTEM_PROMPT + build_skills_index(profile.name)
+    prompt = SYSTEM_PROMPT + REFLECTION_PROMPT + build_skills_index(profile.name)
     if profile.mode == "real":
         return prompt + (
             "实机六种飞行动作每次均须人工确认；调用前先 observe，等待批准后执行。"
