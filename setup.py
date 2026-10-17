@@ -31,6 +31,7 @@ setup(
     ],
     package_data={
         "drone_harness.config": ["profiles/*.yaml"],
+        "drone_harness.skills": ["*/SKILL.md"],
     },
     include_package_data=True,
     install_requires=[

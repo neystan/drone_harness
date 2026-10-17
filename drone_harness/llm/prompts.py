@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from drone_harness.config.schema import RuntimeProfile
+from drone_harness.skills import build_skills_index
 
 SYSTEM_PROMPT = """你是 drone_harness 的长导航任务飞行规划器，依据用户指令、观察与工具反馈行动；用户未要求飞行时正常回答。
 每次回复最多调用一个工具；需要行动就调用工具，不只陈述下一步。
@@ -35,9 +36,10 @@ PROXIMITY_COMPLETION_PROMPT = """接近核验：前视确认目标及要求的�
 
 def build_system_prompt(profile: RuntimeProfile) -> str:
     """生成基础行为规则，仅为实机补充逐动作审批要求。"""
+    prompt = SYSTEM_PROMPT + build_skills_index(profile.name)
     if profile.mode == "real":
-        return SYSTEM_PROMPT + (
+        return prompt + (
             "实机六种飞行动作每次均须人工确认；调用前先 observe，等待批准后执行。"
             "超限请求会被拒绝，请按工具参数限额和深度上限规划。"
         )
-    return SYSTEM_PROMPT
+    return prompt

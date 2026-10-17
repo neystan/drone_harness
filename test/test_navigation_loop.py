@@ -111,7 +111,7 @@ def test_one_input_runs_motion_progress_observation_and_landing(tmp_path, monkey
     moved.assert_called_once()
     landed.assert_called_once()
     for option in client.options:
-        assert option["model"] == "same-vlm" and len(option["tools"]) == 10
+        assert option["model"] == "same-vlm" and len(option["tools"]) == 11
     assert '"current_subgoal_id": "g2"' in client.requests[3][0]["content"]
     for history in client.requests:
         assert_tool_pairs(history)
@@ -424,7 +424,7 @@ def test_real_plan_loop_keeps_landing_approval(tmp_path, monkeypatch, approve):
     assert landed.call_count == int(approve)
     answers.assert_called_once()
     for option in client.options:
-        assert len(option["tools"]) == 10
+        assert len(option["tools"]) == 11
     assert "update_navigation_plan" in client.requests[0][0]["content"]
     assert "实机六种飞行动作每次均须人工确认" in client.requests[0][0]["content"]
     assert '"completed_count": 2' in client.requests[-1][0]["content"]

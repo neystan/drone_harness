@@ -17,6 +17,7 @@ from drone_harness.runtime.navigation import (
 )
 from drone_harness.runtime.observation import ObservationSnapshot, build_observation_message
 from drone_harness.runtime.safety import EndCurrentTurn, SafetyHandoffRequired, request_confirmed_hover
+from drone_harness.runtime.skill_search import build_search_message, clear_search_images
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.runtime.task_memory import is_recoverable_rejection
 from drone_harness.runtime.tool_dispatcher import dispatch_tool_call
@@ -31,6 +32,20 @@ MAX_CORRECTIONS = 2
 
 
 def agent_loop(
+    client: Any,
+    model: str,
+    messages: list[dict[str, Any]],
+    context: ToolContext,
+) -> str:
+    """运行主循环并在任何出口释放 skill 临时图片。"""
+    try:
+        return _run_agent_loop(client, model, messages, context)
+    finally:
+        context.search_observations = None
+        clear_search_images(messages)
+
+
+def _run_agent_loop(
     client: Any,
     model: str,
     messages: list[dict[str, Any]],
@@ -71,6 +86,8 @@ def agent_loop(
         except Exception as exc:
             return _stop_with_message(context, f"模型请求或响应失败，已停止本轮：{type(exc).__name__}",
                                       safety_stop=True)
+        finally:
+            clear_search_images(messages)
         if not isinstance(tool_calls, (list, tuple)) or any(
             not isinstance(getattr(call, "id", None), str)
             or not isinstance(getattr(getattr(call, "function", None), "name", None), str)
@@ -171,6 +188,13 @@ def agent_loop(
             _compact_history(messages, keep_latest=False)
             continue
         if call.function.name == "measure_distance":
+            continue
+        if call.function.name == "activate_skill" and tool_result.get("success"):
+            try:
+                messages.append(build_search_message(context, tool_result["prompt"]))
+            except Exception:
+                return _stop_with_message(context, "四向搜索图组无效，已停止本轮。", safety_stop=True)
+            _compact_history(messages)
             continue
         if not tool_result.get("success"):
             if recoverable:

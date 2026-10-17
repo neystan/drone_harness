@@ -25,6 +25,7 @@ from .schemas import (
     ROTATE_TOOL_SCHEMA,
     TAKEOFF_TOOL_SCHEMA,
     UP_TOOL_SCHEMA,
+    ACTIVATE_SKILL_TOOL_SCHEMA,
     get_tool_schemas,
 )
 
@@ -46,6 +47,7 @@ class ToolContext:
     navigation_plan: NavigationPlan | None = None
     navigation_instruction: str = ""
     navigation_resumable: bool = True
+    search_observations: list[ObservationSnapshot] | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +160,13 @@ def _measure_distance_handler(context: ToolContext, arguments: dict[str, Any]) -
                                    arguments.get("x"), arguments.get("y"))
 
 
+def _activate_skill_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
+    """将内置 skill 交给当前进程中的受控扫描执行。"""
+    from drone_harness.runtime.skill_search import activate_skill
+
+    return activate_skill(context, arguments)
+
+
 TOOL_DEFINITIONS = [
     ToolDefinition("observe", OBSERVE_TOOL_SCHEMA, _observe_handler),
     ToolDefinition("measure_distance", MEASURE_DISTANCE_TOOL_SCHEMA, _measure_distance_handler),
@@ -168,6 +177,7 @@ TOOL_DEFINITIONS = [
     ToolDefinition("down", DOWN_TOOL_SCHEMA, _down_handler),
     ToolDefinition("rotate", ROTATE_TOOL_SCHEMA, _rotate_handler),
     ToolDefinition("land", LAND_TOOL_SCHEMA, _land_handler),
+    ToolDefinition("activate_skill", ACTIVATE_SKILL_TOOL_SCHEMA, _activate_skill_handler),
 ]
 TOOL_DEFINITION_BY_NAME = {definition.name: definition for definition in TOOL_DEFINITIONS}
 TOOL_DEFINITION_BY_NAME["update_navigation_plan"] = ToolDefinition(

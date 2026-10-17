@@ -156,6 +156,24 @@ GET_STATE_TOOL_SCHEMA = {
     },
 }
 
+ACTIVATE_SKILL_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "activate_skill",
+        "description": "按需启用内置 skill。four-direction-search 会固定完成四向扫描并恢复朝向，再一次提供四图。先按指令动作并观察仍找不到、需要扩大范围时使用。",
+        "parameters": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "name": {"type": "string", "enum": ["four-direction-search"]},
+                "prompt": {"type": "string", "minLength": 1, "maxLength": 1000,
+                           "description": "本次搜索重点，由你结合任务和已有观察生成：寻找什么、核对哪些特征或关系。"},
+            },
+            "required": ["name", "prompt"],
+        },
+    },
+}
+
+
 TOOL_SCHEMAS = [
     OBSERVE_TOOL_SCHEMA,
     MEASURE_DISTANCE_TOOL_SCHEMA,
@@ -166,6 +184,7 @@ TOOL_SCHEMAS = [
     DOWN_TOOL_SCHEMA,
     ROTATE_TOOL_SCHEMA,
     LAND_TOOL_SCHEMA,
+    ACTIVATE_SKILL_TOOL_SCHEMA,
 ]
 
 

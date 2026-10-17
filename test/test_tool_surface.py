@@ -9,7 +9,7 @@ from drone_harness.tools.schemas import get_tool_schemas
 
 def test_model_tool_surface_is_observation_state_plus_six_actions() -> None:
     """只公开观察、状态查询及六动作，不恢复任意位移工具。"""
-    expected = {"observe", "measure_distance", "get_state", "takeoff", "forward", "up", "down", "rotate", "land"}
+    expected = {"observe", "measure_distance", "get_state", "takeoff", "forward", "up", "down", "rotate", "land", "activate_skill"}
     assert {tool.name for tool in get_tool_definitions()} == expected
     assert {schema["function"]["name"] for schema in get_tool_schemas()} == expected
     for removed in (
@@ -21,7 +21,6 @@ def test_model_tool_surface_is_observation_state_plus_six_actions() -> None:
         "detect_target",
         "sam_tracking",
         "mouse_tracking",
-        "activate_skill",
     ):
         assert get_tool_definition(removed) is None
 
