@@ -46,8 +46,13 @@ def measure_target_distance(
                   valid_count=int(values.size), max_range_m=config.depth_max_m,
                   observation_age_s=max(0.0, (time.monotonic_ns() - snapshot.received_monotonic_ns) / 1e9))
     if values.size < math.ceil(patch.size * 0.8):
+        if _is_reliably_out_of_range(patch, float(snapshot.depth[v, u]), config.depth_max_m):
+            return {**result, "reason": "OUT_OF_RANGE",
+                    "message": f"所选区域深度达到或超过当前 {config.depth_max_m:g} 米测距上限，"
+                               "无法提供准确目标距离。若选点属于参照物，它尚未进入当前测距范围；"
+                               "请结合图像判断，必要时在前进安全门允许下靠近后重新观察，勿原地反复测距。"}
         return {**result, "reason": "INSUFFICIENT_VALID_DEPTH",
-                "message": "有效深度不足；超出量程的值不能当作目标距离，请重新观察或选点"}
+                "message": "未获得可靠的范围内深度，也不能确认目标超范围；请重新观察或选择清晰实体表面"}
     distance = float(np.median(values))
     p10, p90 = np.percentile(values, [10, 90])
     spread = float(p90 - p10)
@@ -59,3 +64,19 @@ def measure_target_distance(
                 "message": "选点邻域存在明显前后深度差，请选择目标实体表面内部"}
     return {**result, "valid": True, "distance_m": distance, "reason": "OK",
             "message": "距离属于该观察拍摄时的所选可见表面，不等于可直接前进的距离或到达证明"}
+
+
+def _is_reliably_out_of_range(patch: np.ndarray, center: float, max_range_m: float) -> bool:
+    """仅在中心与足量邻域一致超范围时确认，饱和值保留未知。"""
+    # AirSim 以 Float16 读取浮点图像，最大有限值不能当作参照物距离。
+    saturation = float(np.finfo(np.float16).max)
+    if not math.isfinite(center) or not max_range_m <= center < saturation:
+        return False
+    usable = np.isfinite(patch) & (patch > 0) & (patch < saturation)
+    values = patch[usable]
+    if values.size < math.ceil(patch.size * 0.8) or np.any(values < max_range_m):
+        return False
+    median = float(np.median(values))
+    p10, p90 = np.percentile(values, [10, 90])
+    tolerance = max(0.3, median * 0.05)
+    return bool(p90 - p10 <= tolerance and abs(center - median) <= tolerance)

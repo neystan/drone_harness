@@ -35,13 +35,60 @@ def test_invalid_coordinates_are_rejected(x, y):
     assert not result['success'] and not result['valid'] and result['distance_m'] is None
 
 
-@pytest.mark.parametrize('value', [np.nan, np.inf, 0, -1, 20, 65504])
-def test_invalid_or_out_of_range_depth_is_unknown(value):
-    """无效值与量程外深度不能返回为目标距离。"""
+@pytest.mark.parametrize('value', [np.nan, np.inf, 0, -1, 65504, 100000])
+def test_invalid_or_saturated_depth_is_unknown(value):
+    """缺测与饱和值不能当作目标超范围的证据。"""
     result = measure_target_distance(snapshot_at(value), observation_config(), .5, .5)
     assert result['success'] and not result['valid'] and result['distance_m'] is None
     assert result['reason'] == 'INSUFFICIENT_VALID_DEPTH'
     json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize('limit,value', [(20, 20), (20, 25), (20, 100), (10, 12)])
+def test_reliable_far_surface_reports_range_limit_without_exact_distance(limit, value):
+    """一致远距单独提示当前上限，不暴露范围外精确距离。"""
+    config = replace(observation_config(), depth_max_m=limit)
+    result = measure_target_distance(snapshot_at(value), config, .5, .5)
+    assert result['success'] and not result['valid'] and result['distance_m'] is None
+    assert result['reason'] == 'OUT_OF_RANGE' and result['max_range_m'] == limit
+    assert f'{limit} 米测距上限' in result['message']
+    assert '若选点属于参照物' in result['message'] and '前进安全门' in result['message']
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize('center', [np.nan, 0, 6, 65504, 100000, 40])
+def test_far_neighbors_cannot_override_invalid_near_or_inconsistent_center(center):
+    """周围远距不能掩盖中心缺测、近物、饱和或明显分歧。"""
+    source = snapshot_at(25)
+    source.depth[6, 8] = center
+    result = measure_target_distance(source, observation_config(), .5, .5)
+    assert not result['valid'] and result['distance_m'] is None
+    assert result['reason'] != 'OUT_OF_RANGE'
+
+
+@pytest.mark.parametrize('kind', ['near', 'mixed_far', 'missing'])
+def test_unreliable_far_patch_keeps_distance_unknown(kind):
+    """近远混合、远景分歧或有效样本不足时不能宣布超范围。"""
+    source = snapshot_at(25)
+    if kind == 'near':
+        source.depth[4, 6] = 8
+    elif kind == 'mixed_far':
+        source.depth[4:6, 6:11] = 60
+    else:
+        source.depth[4:6, 6:11] = np.nan
+    result = measure_target_distance(source, observation_config(), .5, .5)
+    assert not result['valid'] and result['reason'] == 'INSUFFICIENT_VALID_DEPTH'
+
+
+@pytest.mark.parametrize('missing_count,reason', [(5, 'OUT_OF_RANGE'), (6, 'INSUFFICIENT_VALID_DEPTH')])
+def test_range_limit_needs_eighty_percent_samples(missing_count, reason):
+    """超范围判断沿用八成样本门槛，中心仍必须可用。"""
+    source = snapshot_at(25)
+    patch = source.depth[4:9, 6:11]
+    for index in range(missing_count):
+        patch[index // 5, index % 5] = np.nan
+    result = measure_target_distance(source, observation_config(), .5, .5)
+    assert result['reason'] == reason and not result['valid']
 
 
 def test_local_measurement_filters_holes_without_requiring_clear_corridor():
@@ -91,9 +138,10 @@ def test_measurement_never_captures_or_moves_and_requires_observation(tmp_path):
     assert context.controller.mock_calls == []
 
 
-def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, monkeypatch):
-    """测量在下一轮可见，转向后再次测量必须先获取新图。"""
-    wait = Mock(side_effect=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns))
+@pytest.mark.parametrize('distance,reason', [(4, 'OK'), (25, 'OUT_OF_RANGE')])
+def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, monkeypatch, distance, reason):
+    """距离与超范围提示均交给下一轮，动作后仍要求重新观察。"""
+    wait = Mock(side_effect=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns, distance))
     context = context_for(tmp_path, SimpleNamespace(wait_for_observation=wait))
     context.profile = replace(context.profile, post_motion_wait_enabled=False)
     original_dispatch = loop_module.dispatch_tool_call
@@ -109,6 +157,10 @@ def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, mo
                          for index, (name, args) in enumerate(calls)] +
                         [SimpleNamespace(content='需要重新观察', tool_calls=[])])
     agent_loop(client, 'test', [{'role': 'user', 'content': '靠近墙面'}], context)
-    assert json.loads(client.requests[2][-1]['content'])['distance_m'] == 4
+    feedback = json.loads(client.requests[2][-1]['content'])
+    assert feedback['reason'] == reason
+    assert feedback['distance_m'] == (distance if reason == 'OK' else None)
+    if reason == 'OUT_OF_RANGE':
+        assert '20 米测距上限' in feedback['message']
     assert json.loads(client.requests[4][-1]['content'])['reason'] == 'OBSERVATION_REQUIRED'
     wait.assert_called_once()
