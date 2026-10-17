@@ -33,7 +33,7 @@ def test_system_prompt_focuses_on_navigation_not_tool_implementation(tmp_path):
     for removed in ("单目标", "候选完成", "观测号", "同号", "第二个视觉模型", "19 米", "1000", "不重复索取"):
         assert removed not in prompt
     assert "障碍" in prompt and "不默认视野外的上方或下方安全" in prompt
-    assert "深度只提供障碍净空和前进上限，不代表目标距离" in prompt
+    assert "observe 的深度摘要只提供障碍净空和前进上限，不代表目标距离" in prompt
     assert "看不见目标时，除了左右旋转，也要主动考虑飞高一些" in prompt
     assert "可调用 up 小幅分步上升" in prompt
     assert "每次上升后调用 observe 重新寻找目标" in prompt
@@ -79,7 +79,7 @@ def test_visual_memory_keeps_detail_and_focuses_on_changes(tmp_path):
     prompt = build_system_prompt(context_for(tmp_path).profile)
     for phrase in ("充分描述", "目标特征", "道路与区域边界", "新增信息", "位置关系变化", "疑点的确认结果",
                    "无变化的背景不必完整重述", "区分可见事实与不确定判断",
-                   "深度只提供障碍净空和前进上限，不代表目标距离", "再决定后续飞行动作"):
+                   "observe 的深度摘要只提供障碍净空和前进上限，不代表目标距离", "再决定后续飞行动作"):
         assert phrase in prompt
     assert "一两句话" not in prompt
 
