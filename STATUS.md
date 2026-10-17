@@ -18,6 +18,21 @@
 
 同一个 VLM 先确认参照物，再结合前下视角、实际动作与按需测距核实完成条件；细节见 REVIEW.md。现有提示词先执行指令要求的转向或移动，再定向观察；按任务选证据，不固定左右环视。
 
+2026-10-17 用户确认工具返回精简方案，但所有现有 `message` 字段及文案原样保留；当前仍为设计确认，尚未修改业务代码。只精简模型可见字段，内部校验和必要诊断保留；原本没有 `message` 的分支不补造。拟保留字段如下，条件字段仍按实际分支出现：
+
+| 工具 | 拟保留的模型返回字段 |
+| --- | --- |
+| `measure_distance` | `success`、`distance_m`、`reason`、`message` |
+| `observe` | `success`、`view`、`depth_valid`、`forward_max_m`、异常时的 `depth_reason`、`message` |
+| `forward` | `success`、`motion_executed`、`requested_distance_m`、`commanded_distance_m`、实际移动成功时的 `final_position_ned`、异常时的 `depth_reason`、`message` |
+| `takeoff` | `success`、`target_height`、`final_position_ned`、`message` |
+| `up/down` | `success`、`body_offset_frd`、`final_position_ned`、`message` |
+| `rotate` | `success`、`direction`、`degrees`、`target_yaw_rad`、原分支已有的 `final_position_ned`、`message` |
+| `land` | `success`、`final_position_ned`、`message` |
+| `get_state`、`update_navigation_plan` | 保持当前返回 |
+
+成功运动后继续附加 `observation_current=false`，拟去掉重复的 `observation_note`。失败保留错误码、原 `message`、影响纠正参数的限额、已有最终位置与已确认安全状态；超时或中断不能被补写为未移动。测距沿用现有 `success` 语义，以 `distance_m` 是否为空判断是否取得有效距离，不减少深度质量检查。
+
 ## 未完成待办（沿用原编号）
 
 ### 2. 四向搜索 skill
@@ -27,6 +42,7 @@
 - 2026-10-17 用户进一步明确：先按导航提示或子目标对应动作转向、观察，仍找不到再使用四向寻找 skill；`not_found` 不自动触发扫描。四向转向一周并恢复开始朝向后，再一次交四图给同一个 VLM。
 - 扫描动作沿用现有节奏：每次转向完成后等待 2 秒，再采集该方向的新图；恢复朝向后也按原动作等待规则继续。本项首版不增加专门的扫描偏差检查或校正，原有动作失败和用户中断处理继续保留。
 - 实现建议：skill 说明组织流程，固定扫描脚本复用当前进程的飞控与采图能力，连续采图期间不逐图请求模型；扫描图组直接通过主循环构造成与普通观察相同格式的图文消息，不再要求模型额外调用普通 `observe`。脚本入口与返回接口仍待定；此为设计说明，尚未实现。
+- 已核对原 `drone_agent` skill：目录加载、摘要索引、`activate_skill` 返回正文的方式可以复用，但原校验器不允许脚本目录，也没有固定流程执行与四图生命周期管理。旧搜索正文依赖已移除的 `analyze_view/move`，不能直接搬入；扫描执行仍需接入当前受控运行时，不修改原项目。
 - 复用现有计划与 `evidence`；待定入口/退出接口、四图生命周期及采集或朝向恢复失败反馈。首版不包含定向升高的第二阶段或返回位置锚点。
 
 ### 6. 反思机制
@@ -35,6 +51,7 @@
 - 主 VLM 输出 `target_status`：`confirmed`（证据足够）、`uncertain`（有疑点）、`not_found`（本次未找到），据此继续导航、带问题核实或寻找。
 - 普通单图、前下双图和搜索四图后的 VLM 判断使用同一套 `target_status`；工具自身只报告取图、动作与执行结果，不能由程序伪造目标判断。该字段属于 VLM 输出，不是现有 `observe` 工具已经返回的字段。
 - 核实复用 `observe(prompt)` 与现有动作，证据充分时不强制反问，不新增模型或专门检查轮次；确认参照物不自动完成子目标，未找到也不等于目标不存在。
+- 最小输出建议为主 VLM 的 `target_status` 与 `message`：`uncertain` 时在 `message` 说明缺少的证据，需要新观察时把疑点写进 `observe.prompt`；不另加 `question` 字段或反问工具。当前图能解决的疑点当场解决，只有需要新证据时才继续动作和观察；不额外增加一次纯反思模型请求。该 `message` 是 VLM 判断文字，与工具原有 `message` 分开。
 - 待定字段存放与输出接口；复用原计划及 `evidence`，不将全部候选检查过程塞入计划。
 
 ## 已完成
