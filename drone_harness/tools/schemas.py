@@ -128,7 +128,7 @@ MEASURE_DISTANCE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "measure_distance",
-        "description": "按需测量最新前视观察中所选可见表面。动作后先重新 observe；只读配对深度，不移动。返回相机射线距离与有效性，不证明目标身份或到达。",
+        "description": "仅用于需要距离证据的接近状态核验；常规前进无需先测距。只读最新前视选点的配对深度，不移动；动作后先 observe。返回射线距离与有效性，不自动判定目标身份或到达。",
         "parameters": {
             "type": "object", "additionalProperties": False,
             "properties": {
