@@ -9,6 +9,10 @@ from unittest.mock import Mock
 import pytest
 
 import drone_harness.runtime.agent_loop as loop
+from drone_harness.llm.prompts import (
+    LANDMARK_OBSERVATION_PROMPT, NAVIGATION_EXECUTION_PROMPT,
+    PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
+)
 from drone_harness.runtime.navigation import parse_navigation_plan
 from drone_harness.runtime.runtime import _run_interactive_loop
 from drone_harness.runtime.safety import EndCurrentTurn
@@ -18,13 +22,23 @@ from test_navigation_loop import (
 from test_navigation_plan import plan_payload
 
 
-def test_prompt_contains_general_completion_examples(tmp_path):
-    """模型请求包含空间关系示例与完成前左右观察要求。"""
+def test_prompt_injects_short_navigation_and_relation_rules(tmp_path):
+    """实际模型请求包含分段规则，只使用现有能力并按需核验。"""
     context = nav_context(tmp_path)
     client = RecordingClient([reply(text="收到")])
     loop.agent_loop(client, "test", messages(), context)
     prompt = client.requests[0][0]["content"]
-    assert all(word in prompt for word in ("十字路口中央", "蓝色卡车", "白色建筑", "先向左、向右旋转并分别调用 observe"))
+    for section in (NAVIGATION_EXECUTION_PROMPT, LANDMARK_OBSERVATION_PROMPT,
+                    SPATIAL_COMPLETION_PROMPT, PROXIMITY_COMPLETION_PROMPT):
+        assert prompt.count(section) == 1
+    for rule in ("先执行当前段要求的转向或移动", "结合外观、邻近关系和路线顺序核对实例",
+                 "遮挡可用 up 分步升高，每次后观察", "front、down 或 both",
+                 "核对机下位置是否落入目标范围", "目标前后位置变化", "入口到出口的移动与边界变化",
+                 "仅在接近状态不确定且需距离证据时", "当前前视图实体表面内部选点",
+                 "常规前进无需测距", "区分超范围和未知"):
+        assert rule in prompt
+    assert "先向左、向右旋转" not in prompt
+    assert "skill" not in prompt and "target_status" not in prompt
 
 
 @pytest.mark.parametrize("enabled", [False, True])

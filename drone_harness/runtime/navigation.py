@@ -6,7 +6,10 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from drone_harness.llm.prompts import NAVIGATION_EXECUTION_PROMPT
+from drone_harness.llm.prompts import (
+    LANDMARK_OBSERVATION_PROMPT, NAVIGATION_EXECUTION_PROMPT,
+    PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
+)
 
 
 @dataclass
@@ -149,8 +152,9 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
 
 def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | None,
                         *, observation_current: bool) -> list[dict[str, Any]]:
-    """每轮注入最新清单，不累积旧快照。"""
-    content = NAVIGATION_EXECUTION_PROMPT
+    """注入精简的分段导航规则与最新清单，不累积旧快照。"""
+    content = "\n".join((NAVIGATION_EXECUTION_PROMPT, LANDMARK_OBSERVATION_PROMPT,
+                         SPATIAL_COMPLETION_PROMPT, PROXIMITY_COMPLETION_PROMPT))
     if plan is not None:
         snapshot = plan.snapshot()
         snapshot["observation_current"] = observation_current
