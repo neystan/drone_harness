@@ -20,7 +20,7 @@ from drone_harness.testing.batch_support import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
-MAX_CASE_TIMEOUT_S = 30 * 60
+MAX_CASE_TIMEOUT_S = 40 * 60
 DEFAULTS = {
     "cases": "351", "scenes": [9, 13, 21, 24], "repeat": 1,
     "data_root": "/home/stan/AirVLN_ws/DATA/data/aerialvln-s",
@@ -60,7 +60,7 @@ def read_config(args: argparse.Namespace) -> dict:
         if isinstance(config[key], bool) or not isinstance(config[key], int) or config[key] <= 0:
             raise ValueError(f"{key} 必须为正整数")
     if config["case_timeout_s"] > MAX_CASE_TIMEOUT_S:
-        raise ValueError("每个 case 最多运行 1800 秒（30 分钟）；case_timeout_s 可调低，不能调高")
+        raise ValueError("每个 case 最多运行 2400 秒（40 分钟）；case_timeout_s 可调低，不能调高")
     if (not math.isfinite(config["video_fps"]) or not 1 <= config["video_fps"] <= 30
             or not math.isfinite(config["preview_fps"]) or not 1 <= config["preview_fps"] <= 30
             or not math.isfinite(config["min_free_gb"]) or not 0 < config["min_free_gb"]):

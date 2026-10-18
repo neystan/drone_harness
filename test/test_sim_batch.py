@@ -31,12 +31,15 @@ def test_selection_preserves_order_and_supports_long_ranges():
     assert select_indices("0-350", many, [9]) == list(range(351))
 
 
-def test_case_timeout_defaults_to_30_minutes_and_cannot_exceed_it(tmp_path):
+def test_case_timeout_defaults_to_40_minutes_and_cannot_exceed_it(tmp_path):
+    """确认默认与显式四十分钟可用，超过一秒即拒绝。"""
     args = SimpleNamespace(config=None, cases=None, repeat=None, scenes=None, cases_file=None)
-    assert batch.read_config(args)["case_timeout_s"] == 1800
+    assert batch.read_config(args)["case_timeout_s"] == 2400
     args.config = tmp_path / "batch.json"
-    write_json(args.config, {"case_timeout_s": 3600})
-    with pytest.raises(ValueError, match="30 分钟"):
+    write_json(args.config, {"case_timeout_s": 2400})
+    assert batch.read_config(args)["case_timeout_s"] == 2400
+    write_json(args.config, {"case_timeout_s": 2401})
+    with pytest.raises(ValueError, match="40 分钟"):
         batch.read_config(args)
     write_json(args.config, {"case_timeout_s": 1200})
     assert batch.read_config(args)["case_timeout_s"] == 1200
@@ -166,8 +169,9 @@ def test_runtime_stop_finalizes_before_process_cleanup(tmp_path, monkeypatch, co
     assert events.index("scored") < events.index("stop_scene")
 
 
-def test_evaluation_finishes_before_runtime_without_false_timeout(tmp_path, monkeypatch):
-    """正常降落先被评分器确认时，停止标志不得误记为超时。"""
+@pytest.mark.parametrize("runtime_completed", [False, True])
+def test_evaluation_finishes_before_runtime_without_false_timeout(tmp_path, monkeypatch, runtime_completed):
+    """降落成功按评测完成结算，同时保留 runtime 原始的清单结果。"""
     class FakeProcess:
         def __init__(self, command, log_path, **kwargs):
             self.name = log_path.stem
@@ -184,7 +188,9 @@ def test_evaluation_finishes_before_runtime_without_false_timeout(tmp_path, monk
         def wait(self, timeout):
             if self.name == "agent":
                 assert not (self.root / "stop.json").exists()
-                write_json(self.root / "runtime_result.json", {"status": "completed", "end_reason": "runtime_completed"})
+                write_json(self.root / "runtime_result.json", {
+                    "status": "completed" if runtime_completed else "incomplete",
+                    "end_reason": "runtime_completed" if runtime_completed else "runtime_stopped"})
             self.returncode = 0
         def stop(self):
             self.returncode = 0
@@ -195,7 +201,8 @@ def test_evaluation_finishes_before_runtime_without_false_timeout(tmp_path, monk
     root = tmp_path / "attempt"
     result = batch.run_case(config, episodes()[0], 0, root, {"PATH": "/usr/bin"})
     assert result["end_reason"] == "successful_land" and result["SR"] == 1
-    assert result["runtime_status"] == "completed" and not result["halt_batch"]
+    assert result["status"] == "completed" and not result["halt_batch"]
+    assert result["runtime_status"] == ("completed" if runtime_completed else "incomplete")
     assert json.loads((root / "stop.json").read_text())["end_reason"] == "successful_land"
 
 

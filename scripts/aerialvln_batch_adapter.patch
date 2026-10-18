@@ -1,5 +1,5 @@
 diff --git a/tests/test_aerialvln_evaluation.py b/tests/test_aerialvln_evaluation.py
-index 3f75fe5..259ec07 100644
+index 3f75fe5..0e120fa 100644
 --- a/tests/test_aerialvln_evaluation.py
 +++ b/tests/test_aerialvln_evaluation.py
 @@ -84,8 +84,8 @@ class MetricTests(unittest.TestCase):
@@ -35,15 +35,18 @@ index 3f75fe5..259ec07 100644
      def test_counts_successful_navigation_tools_until_successful_land(self):
          stats = ToolCallStats()
          events = [
-@@ -238,6 +253,104 @@ class MonitorTests(unittest.TestCase):
+@@ -238,6 +253,132 @@ class MonitorTests(unittest.TestCase):
          _write_split(data_root, [_episode(goal=[10.0, 0.0, -3.0])])
          return select_evaluation_target(data_root, "val_unseen", case_index=0)
 
-+    def test_runtime_completion_controls_score_with_or_without_landing(self):
-+        """正常非降落结束可计分，提前降落不能替代 runtime 最终状态。"""
-+        for landed, completed, x in [(False, True, 9), (True, False, 9), (True, True, 9),
-+                                     (False, True, 50)]:
-+            with self.subTest(landed=landed, completed=completed, x=x), tempfile.TemporaryDirectory() as temp_dir:
++    def test_landing_or_runtime_completion_controls_score(self):
++        """降落成功或模型正常完成均结束测试，SR 仍要求终点距离合格。"""
++        for landed, completed, x, result_ready in [
++                (False, True, 9, False), (True, False, 9, False), (True, True, 9, False),
++                (False, False, 9, False), (False, True, 50, False), (True, False, 50, False),
++                (True, False, 9, True), (True, False, 50, True)]:
++            with self.subTest(landed=landed, completed=completed, x=x, result_ready=result_ready), \
++                    tempfile.TemporaryDirectory() as temp_dir:
 +                root = Path(temp_dir)
 +                session = root / "logs/session_new"
 +                session.mkdir(parents=True)
@@ -54,18 +57,43 @@ index 3f75fe5..259ec07 100644
 +                result_file = root / "runtime_result.json"
 +
 +                def finish_runtime():
++                    """在下一次轮询前写入模型运行结果。"""
 +                    result_file.write_text(json.dumps({"session_id": "new",
 +                        "status": "completed" if completed else "incomplete",
 +                        "end_reason": "runtime_completed" if completed else "runtime_stopped"}))
 +
++                if result_ready:
++                    finish_runtime()
 +                clock = _FakeClock(on_sleep=finish_runtime)
 +                report = monitor_evaluation(_FakeAirSimClient([(x, 0, -3)]), "PX4", self._target(root),
 +                    root / "evaluation.json", root / "logs", [], agent_result_path=result_file,
 +                    timeout_s=5, clock=clock, sleep=clock.sleep)
-+                self.assertEqual(clock.value, 0.2)
-+                self.assertEqual(report["status"], "completed" if completed else "incomplete")
-+                self.assertEqual(report["metrics"]["SR"], int(completed and x == 9))
++                self.assertEqual(clock.value, 0 if landed else 0.2)
++                self.assertEqual(report["status"], "completed" if landed or completed else "incomplete")
++                self.assertEqual(report["end_reason"], "successful_land" if landed else
++                                 "runtime_completed" if completed else "runtime_stopped")
++                self.assertEqual(report["metrics"]["SR"], int((landed or completed) and x == 9))
 +                self.assertEqual(report["diagnostics"]["land_succeeded"], landed)
++                if result_ready:
++                    self.assertEqual(json.loads(result_file.read_text())["status"], "incomplete")
++
++    def test_failed_landing_does_not_override_incomplete_runtime(self):
++        """降落失败不能因终点距离合格就把测试标成完成。"""
++        with tempfile.TemporaryDirectory() as temp_dir:
++            root = Path(temp_dir)
++            session = root / "logs/session_new"
++            session.mkdir(parents=True)
++            (session / "tool_calls.jsonl").write_text(json.dumps(_tool_event("land", success=False)) + "\n")
++            result_file = root / "runtime_result.json"
++            result_file.write_text(json.dumps({"session_id": "new", "status": "incomplete",
++                                               "end_reason": "runtime_stopped"}))
++            report = monitor_evaluation(_FakeAirSimClient([(9, 0, -3)]), "PX4", self._target(root),
++                root / "evaluation.json", root / "logs", [], agent_result_path=result_file,
++                sleep=lambda seconds: self.fail("已有最终结果，不应等待"))
++            self.assertEqual(report["status"], "incomplete")
++            self.assertEqual(report["end_reason"], "runtime_stopped")
++            self.assertEqual(report["metrics"]["SR"], 0)
++            self.assertFalse(report["diagnostics"]["land_succeeded"])
 +
 +    def test_failed_final_pose_cannot_score_old_pose_as_success(self):
 +        """最终位置读取失败时保留已有距离，但不能据此记为正常成功。"""
@@ -141,7 +169,7 @@ index 3f75fe5..259ec07 100644
          with tempfile.TemporaryDirectory() as temp_dir:
              root = Path(temp_dir)
 diff --git a/tools/aerialvln_evaluation.py b/tools/aerialvln_evaluation.py
-index fdd9a6a..ba6a6c3 100644
+index fdd9a6a..96d8f00 100644
 --- a/tools/aerialvln_evaluation.py
 +++ b/tools/aerialvln_evaluation.py
 @@ -17,7 +17,7 @@ from tools.aerialvln_case import load_raw_episodes
@@ -171,15 +199,7 @@ index fdd9a6a..ba6a6c3 100644
              "OSR": int(
                  self.minimum_distance_m is not None
                  and self.minimum_distance_m <= SUCCESS_DISTANCE_M
-@@ -154,17 +154,21 @@ class ToolCallStats:
-     failed_calls: int = 0
-     steps_taken: int = 0
-     land_succeeded: bool = False
-+    stop_on_land: bool = True
-
-     def consume(self, event: dict[str, Any]) -> None:
--        if self.land_succeeded or event.get("event_type") != "tool_call":
-+        if (self.stop_on_land and self.land_succeeded) or event.get("event_type") != "tool_call":
+@@ -160,11 +160,14 @@ class ToolCallStats:
              return
          tool_name = event.get("tool_name")
          result = event.get("result")
@@ -195,7 +215,7 @@ index fdd9a6a..ba6a6c3 100644
                  self.steps_taken += 1
              if tool_name == "land":
                  self.land_succeeded = True
-@@ -243,7 +247,7 @@ def build_report(
+@@ -243,7 +246,7 @@ def build_report(
      error_message: str | None = None,
  ) -> dict[str, Any]:
      """Build the stable evaluation report document."""
@@ -204,17 +224,17 @@ index fdd9a6a..ba6a6c3 100644
      return {
          "schema_version": 1,
          "status": status,
-@@ -256,6 +260,9 @@ def build_report(
+@@ -256,6 +259,9 @@ def build_report(
          "metrics": state.metrics(completed, tool_stats.steps_taken),
          "diagnostics": {
              "success_distance_m": SUCCESS_DISTANCE_M,
-+            "success_definition": "normal_completion_and_horizontal_NE_le_20m_v3",
++            "success_definition": "land_or_runtime_completion_and_horizontal_NE_le_20m_v4",
 +            "land_succeeded": tool_stats.land_succeeded,
 +            "steps_definition": "successful_motion_tools_v2: takeoff/move/forward/up/down/rotate/return_home; exclude explicit no-motion and zero rotation",
              "sample_interval_s": state.sample_interval_s,
              "minimum_distance_m": state.minimum_distance_m,
              "pose_sample_count": state.sample_count,
-@@ -314,6 +321,8 @@ def monitor_evaluation(
+@@ -314,6 +320,8 @@ def monitor_evaluation(
      sample_interval_s: float = 0.2,
      timeout_s: float = 3600.0,
      max_consecutive_pose_failures: int = 5,
@@ -223,16 +243,7 @@ index fdd9a6a..ba6a6c3 100644
      clock: Callable[[], float] = time.monotonic,
      sleep: Callable[[float], None] = time.sleep,
      utc_now: Callable[[], str] = _utc_now,
-@@ -328,7 +337,7 @@ def monitor_evaluation(
-
-     baseline = frozenset(baseline_sessions)
-     state = EvaluationState(target.goal_position_ned, sample_interval_s)
--    tool_stats = ToolCallStats()
-+    tool_stats = ToolCallStats(stop_on_land=agent_result_path is None)
-     session_path = None
-     log_tail = None
-     pose_rpc_failures = 0
-@@ -338,11 +347,18 @@ def monitor_evaluation(
+@@ -338,11 +346,18 @@ def monitor_evaluation(
      status = "incomplete"
      end_reason = "evaluation_timeout"
      error_message = None
@@ -252,15 +263,10 @@ index fdd9a6a..ba6a6c3 100644
                  consecutive_pose_failures = 0
              except Exception:
                  pose_rpc_failures += 1
-@@ -364,10 +380,26 @@ def monitor_evaluation(
-             if log_tail is not None:
-                 for event in log_tail.read_new():
-                     tool_stats.consume(event)
--                    if tool_stats.land_succeeded:
-+                    if tool_stats.land_succeeded and agent_result_path is None:
+@@ -367,6 +382,22 @@ def monitor_evaluation(
+                     if tool_stats.land_succeeded:
                          break
 
--            if tool_stats.land_succeeded:
 +            # 定期落盘，使评分器异常退出时仍可恢复最后一次已保存的指标。
 +            if clock() >= next_checkpoint:
 +                write_evaluation_report(checkpoint_path, build_report(
@@ -276,12 +282,11 @@ index fdd9a6a..ba6a6c3 100644
 +                end_reason = result.get("end_reason", "batch_stopped_case")
 +                break
 +
-+            # 批测必须等 runtime 最终结果，不能用提前降落替代导航完成。
-+            if agent_result_path is None and tool_stats.land_succeeded:
++            # 降落成功即完成；未降落时仍以 runtime 的模型完成结果结算。
+             if tool_stats.land_succeeded:
                  try:
                      state.add_pose(read_absolute_position(client, vehicle_name))
-                     consecutive_pose_failures = 0
-@@ -378,6 +410,23 @@ def monitor_evaluation(
+@@ -378,6 +409,23 @@ def monitor_evaluation(
                  end_reason = "successful_land"
                  break
 
