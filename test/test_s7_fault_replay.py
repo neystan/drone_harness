@@ -33,8 +33,8 @@ def test_actual_sim_profile_uses_verified_meter_depth_but_not_scene_7(
                                               context.profile.forward_step_limit_m)
 
     assert context.profile.observation.depth_semantics == "perspective_ray_m"
-    assert context.profile.observation.depth_max_m == 20
-    assert context.profile.forward_step_limit_m == 19
+    assert context.profile.observation.depth_max_m == 30
+    assert context.profile.forward_step_limit_m == 30
     assert context.depth_rules.depth_valid
     assert context.depth_rules.observation_id == snapshot.observation_id
     assert context.depth_rules.forward_max_m > 0

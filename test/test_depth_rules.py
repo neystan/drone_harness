@@ -74,20 +74,24 @@ def test_clearance_uses_perspective_geometry_and_profile_cap() -> None:
     assert "本次观测的前进上限：0.30 米" in rules.as_text()
 
 
-def test_sim_twenty_meter_horizon_and_one_meter_planned_clearance() -> None:
-    """仿真 20 米远景最多约 19 米，前缘 1.5 米障碍只给约 0.5 米。"""
+def test_sim_thirty_meter_horizon_and_one_meter_planned_clearance() -> None:
+    """仿真三十米视距保留一米净空，实机仍为二十米观测范围。"""
     settings = Path(__file__).parents[1] / "settings.example.json"
     profile = load_profile("sim", settings_path=settings)
     config = profile.observation
     assert config.measurement_margin_m + config.braking_margin_m + config.latency_margin_m == 1.0
-    assert profile.forward_step_limit_m == 19.0
+    assert config.depth_max_m == profile.forward_step_limit_m == 30.0
+    real = load_profile("real", settings_path=settings)
+    assert real.observation.depth_max_m == 20.0
+    assert real.forward_step_limit_m == real.safety.max_relative_move_m
 
     source = snapshot_at(65504.0)
-    far = replace(source, intrinsics=replace(source.intrinsics, fx=32.0, fy=32.0))
+    far = replace(source, intrinsics=replace(source.intrinsics, fx=64.0, fy=64.0))
     far_rules = compute_depth_rules(far, config, profile.forward_step_limit_m)
     assert far_rules.depth_valid
     assert far_rules.front_obstacle_m is None
-    assert 18.7 < far_rules.forward_max_m <= 19.0
+    assert 28.7 < far_rules.forward_max_m < 29.0
+    assert "30 米探测范围内未检测到障碍" in far_rules.as_text()
 
     near_depth = far.depth.copy()
     near_depth[5, 7] = 1.55

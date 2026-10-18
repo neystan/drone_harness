@@ -32,7 +32,7 @@ def test_prompt_injects_short_navigation_and_relation_rules(tmp_path):
                     SPATIAL_COMPLETION_PROMPT, PROXIMITY_COMPLETION_PROMPT):
         assert prompt.count(section) == 1
     for rule in ("先执行当前段要求的转向或移动", "结合外观、邻近关系和路线顺序核对实例",
-                 "遮挡可用 up 分步升高，每次后观察", "front、down 或 both",
+                 "判断参照物被遮挡时，优先用 up 分步升高，每次后观察", "front、down 或 both",
                  "核对机下位置是否落入目标范围", "目标前后位置变化", "入口到出口的移动与边界变化",
                  "仅在接近状态不确定且需距离证据时", "当前前视图实体表面内部选点",
                  "常规前进无需测距", "区分超范围和未知"):

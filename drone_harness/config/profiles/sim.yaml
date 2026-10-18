@@ -26,7 +26,7 @@ observation:
   wait_timeout_s: 2.0
   # 仅 scene 9/13/21/24 已抽测米制；scene 7 的旧起点不可用于自主前进。
   depth_semantics: perspective_ray_m
-  depth_max_m: 20.0
+  depth_max_m: 30.0
   camera_forward_offset_m: 0.5
   body_front_offset_m: 0.55
   body_half_width_m: 0.45
@@ -41,7 +41,7 @@ safety:
   human_in_the_loop_for_flight_tools: false
   max_takeoff_height_m: 10
   max_relative_move_m: 0.3
-  max_forward_m: 19.0
+  max_forward_m: 30.0
   max_vertical_move_m: 10
   max_rotation_deg: 360
   action_timeout_s: 30

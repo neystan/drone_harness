@@ -747,7 +747,8 @@ def forward(context: Any, distance_m: Any) -> dict[str, Any]:
             if rules.front_obstacle_m is not None:
                 why = f"前方约 {rules.front_obstacle_m:.2f} 米有障碍物，需保留约 1 米计划净空"
             else:
-                why = f"20 米探测视距及单次 {context.profile.forward_step_limit_m:.2f} 米上限"
+                why = (f"{context.profile.observation.depth_max_m:g} 米探测视距及单次 "
+                       f"{context.profile.forward_step_limit_m:.2f} 米上限")
             result["message"] = (
                 f"请求前进 {requested:.2f} 米，因{why}，按安全上限指令前进 {commanded:.2f} 米；"
                 f"{result.get('message', '动作已完成')}"

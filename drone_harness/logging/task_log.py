@@ -100,6 +100,24 @@ def log_context_usage(profile: RuntimeProfile, session_id: str, model: str, usag
         pass
 
 
+def log_model_request(profile: RuntimeProfile, session_id: str, model: str, request_id: str,
+                      status: str, image_count: int, *, elapsed_s: float | None = None,
+                      usage: Any = None, error_type: str | None = None) -> None:
+    """记录请求起止、耗时和同次用量，不保存消息、图片或异常正文。"""
+    event = {
+        "timestamp": _timestamp(), "profile_name": profile.name, "event_type": "model_request",
+        "request_id": request_id, "model": model, "status": status,
+        "image_count": image_count, "elapsed_s": elapsed_s, "error_type": error_type,
+    }
+    for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = getattr(usage, name, None)
+        event[name] = value if type(value) is int and value >= 0 else None
+    try:
+        append_jsonl(str(_session_log_dir(profile, session_id)), "model_requests.jsonl", event)
+    except OSError:
+        pass
+
+
 def log_task_state(
     profile: RuntimeProfile,
     session_id: str,

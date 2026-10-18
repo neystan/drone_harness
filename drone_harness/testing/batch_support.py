@@ -105,6 +105,17 @@ def save_summary(root: Path, rows: list[dict], planned: int, status: str) -> Non
         lines.append(f"| {label} | {group['attempts']} | " + " | ".join(values) + " |")
     lines += ["", f"NE 缺失次数：{summary['overall']['NE_missing_count']}。失败尝试保留实际 OSR 和步数。",
               "SR/OSR 为 0–1 均值；steps_taken 同时包含失败尝试，成功样本均值另见 summary.json。"]
+    if (root / "trajectory_comparison.png").is_file():
+        lines += ["", "[轨迹总览](trajectory_comparison.png)"]
+    case_links = []
+    for row in rows:
+        if "attempt" not in row:
+            continue
+        name = f"{row['attempt']:05d}-r{row['cycle']}-case{row['case_index']}"
+        if (root / name / "trajectory.png").is_file():
+            case_links.append(f"- [Case {row['case_index']} / 循环 {row['cycle']} / 尝试 {row['attempt']}]({name}/trajectory.png)")
+    if case_links:
+        lines += ["", *case_links]
     (root / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

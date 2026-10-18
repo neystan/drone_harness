@@ -31,7 +31,7 @@ FORWARD_TOOL_SCHEMA = {
             "properties": {
                 "distance_m": {
                     "type": "number",
-                    "description": "本次请求的前进距离，必须大于 0，不超过 19 米。",
+                    "description": "本次请求的前进距离，必须大于 0，不超过 29 米。",
                 }
             },
             "required": ["distance_m"],
@@ -228,9 +228,12 @@ def get_tool_schemas(profile: RuntimeProfile | None = None, *, navigation_enable
     if profile is None:
         return schemas
     functions = {item["function"]["name"]: item["function"] for item in schemas}
+    forward_limit = profile.forward_step_limit_m
+    if profile.mode == "simulation":
+        forward_limit = min(forward_limit, 29.0)
     limits = (
         ("takeoff", "height", "本次起飞的相对高度", profile.safety.max_takeoff_height_m),
-        ("forward", "distance_m", "本次请求的前进距离", profile.forward_step_limit_m),
+        ("forward", "distance_m", "本次请求的前进距离", forward_limit),
         ("up", "distance_m", "本次上升距离", profile.safety.max_vertical_move_m),
         ("down", "distance_m", "本次下降距离", profile.safety.max_vertical_move_m),
     )

@@ -144,12 +144,12 @@ def test_real_forward_still_rejects_loiter(tmp_path: Path) -> None:
 
 
 def test_sim_forward_clamps_to_new_depth_limit_and_profile_cap(tmp_path: Path, monkeypatch) -> None:
-    """仿真超本次新深度或 19 米上限时按较小值下发并说明。"""
+    """仿真三十米硬上限仍受新深度和一米净空限制。"""
     context = forward_context(tmp_path)
     context.controller.wait_for_observation = lambda *, after_stamp_ns, view="front": near_snapshot(after_stamp_ns)
     move = Mock(return_value={"success": True, "message": "move complete"})
     monkeypatch.setattr(flight, "move", move)
-    assert context.profile.forward_step_limit_m == 19
+    assert context.profile.forward_step_limit_m == 30
     assert context.profile.safety.max_relative_move_m == 0.3
     assert flight.validate_forward(context, 0.25) is None
     result = flight.forward(context, 2.0)
@@ -164,7 +164,9 @@ def test_sim_forward_clamps_to_new_depth_limit_and_profile_cap(tmp_path: Path, m
         fresh_snapshot(after_stamp_ns, 65504.0),
         intrinsics=replace(fresh_snapshot(after_stamp_ns).intrinsics, fx=100000.0, fy=100000.0))
     result = flight.forward(context, 30.0)
-    assert 18.9 < result["commanded_distance_m"] <= 19.0
+    assert 28.9 < result["commanded_distance_m"] < 29.0
+    assert "30 米探测视距" in result["message"]
+    assert "单次 30.00 米上限" in result["message"]
     assert move.call_args.args[1:] == (result["commanded_distance_m"], 0.0, 0.0)
 
 
@@ -205,7 +207,7 @@ def test_runtime_prompt_explains_sim_and_real_limits(tmp_path: Path) -> None:
     sim_prompt = build_system_prompt(context.profile)
     assert "19 米" not in sim_prompt and "约 1 米" not in sim_prompt
     assert "缩短" in sim_prompt and "不执行" in sim_prompt
-    assert "19 米" in str(get_tool_schemas(context.profile))
+    assert "29 米" in str(get_tool_schemas(context.profile))
     real_profile = replace(context.profile, mode="real", safety=replace(
         context.profile.safety, max_relative_move_m=0.2))
     real_prompt = build_system_prompt(real_profile)

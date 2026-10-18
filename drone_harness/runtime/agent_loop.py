@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import math
 import time
+from time import monotonic_ns, perf_counter
 from typing import Any
 
 from drone_harness.bus.intervention import interrupt_if_requested
 from drone_harness.logging.task_log import (
-    log_agent_message, log_context_usage, log_navigation_plan, log_observation, log_task_state, log_tool_call,
+    log_agent_message, log_context_usage, log_model_request, log_navigation_plan,
+    log_observation, log_task_state, log_tool_call,
     save_observation_image,
 )
 from drone_harness.runtime.navigation import (
@@ -82,14 +84,25 @@ def _run_agent_loop(
             and item["content"][0].get("text", "").startswith(SEARCH_MARKER)
             for item in messages)
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=(navigation_messages(messages, plan, observation_current=_navigation_observation_current(context))
-                          if navigation_enabled else messages),
-                tools=get_tool_schemas(context.profile, navigation_enabled=navigation_enabled),
-                tool_choice="auto",
-                temperature=0.0,
-            )
+            request_messages = (navigation_messages(messages, plan, observation_current=_navigation_observation_current(context))
+                                if navigation_enabled else messages)
+            image_count = sum(part.get("type") == "image_url" for item in request_messages
+                              if isinstance(item.get("content"), list) for part in item["content"])
+            request_id = f"request-{monotonic_ns()}"
+            log_model_request(context.profile, context.session_id, model, request_id, "started", image_count)
+            started = perf_counter()
+            try:
+                response = client.chat.completions.create(
+                    model=model, messages=request_messages,
+                    tools=get_tool_schemas(context.profile, navigation_enabled=navigation_enabled),
+                    tool_choice="auto", temperature=0.0,
+                )
+            except BaseException as exc:
+                log_model_request(context.profile, context.session_id, model, request_id, "failed", image_count,
+                                  elapsed_s=perf_counter() - started, error_type=type(exc).__name__)
+                raise
+            log_model_request(context.profile, context.session_id, model, request_id, "completed", image_count,
+                              elapsed_s=perf_counter() - started, usage=getattr(response, "usage", None))
             log_context_usage(context.profile, context.session_id, model, getattr(response, "usage", None))
             message = response.choices[0].message
             tool_calls = message.tool_calls or []

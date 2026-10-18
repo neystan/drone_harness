@@ -205,7 +205,7 @@ def test_motion_then_explicit_observe_sends_new_frame_to_same_model(tmp_path: Pa
 
 
 def test_sim_forward_gets_new_depth_without_observe_and_clamps(tmp_path: Path, monkeypatch) -> None:
-    """没有模型可见图像也必须先获取新深度，近障上限优先于 19 米。"""
+    """没有模型可见图像也必须先获取新深度，近障上限优先于三十米。"""
     observed: list[int] = []
 
     def wait_for_observation(*, after_stamp_ns: int, timeout_s: float | None = None, view="front"):
@@ -233,7 +233,7 @@ def test_sim_forward_gets_new_depth_without_observe_and_clamps(tmp_path: Path, m
 
 
 def test_sim_forward_missing_depth_returns_normal_zero_motion(tmp_path: Path, monkeypatch) -> None:
-    """调用时没有新 RGB-D 则回报 0 米，不能退回 19 米盲飞。"""
+    """调用时没有新 RGB-D 则回报零米，不能退回三十米盲飞。"""
     wait = Mock(return_value=None)
     controller = SimpleNamespace(
         wait_for_observation=wait,

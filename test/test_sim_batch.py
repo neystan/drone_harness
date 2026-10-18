@@ -239,7 +239,9 @@ def test_missing_final_report_recovers_saved_checkpoint(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("end_reason", ["runtime_stopped", "case_timeout"])
-def test_repeats_whole_selection_and_advances_after_failure(tmp_path, monkeypatch, end_reason):
+@pytest.mark.parametrize("plot_failure", [False, True])
+def test_repeats_whole_selection_and_advances_after_failure(tmp_path, monkeypatch, end_reason, plot_failure):
+    """每条结算后生成单图和总览，绘图失败仍推进且保留原评分。"""
     write_json(tmp_path / "val_unseen.json", {"episodes": episodes()})
     config = {**batch.DEFAULTS, "cases": "2,0", "repeat": 2, "data_root": str(tmp_path),
               "output_root": str(tmp_path / "batches"), "record": False, "preview": False}
@@ -254,10 +256,27 @@ def test_repeats_whole_selection_and_advances_after_failure(tmp_path, monkeypatc
                 "status": "incomplete", "end_reason": end_reason, "NE": 30, "SR": 0, "OSR": 1,
                 "steps_taken": 2, "halt_batch": False}
     monkeypatch.setattr(batch, "run_case", run_case)
+    plotted = []
+
+    def case_plot(case_dir, row, item):
+        """记录真实接入点，并可模拟绘图失败。"""
+        plotted.append((row["attempt"], row["cycle"], row["case_index"]))
+        if plot_failure:
+            raise OSError("offline plotting failure")
+
+    def batch_plot(root, rows, items):
+        """每次case结算后总览必须包含全部已结算尝试。"""
+        assert len(rows) == len(plotted)
+
+    monkeypatch.setattr(batch, "save_case_plot", case_plot)
+    monkeypatch.setattr(batch, "save_batch_plot", batch_plot)
     assert batch.main([]) == 0
     assert order == [2, 0, 2, 0]
     summary = json.loads(next((tmp_path / "batches").glob("*/summary.json")).read_text())
     assert summary["finished_attempts"] == 4 and summary["overall"]["SR"] == 0
+    assert plotted == [(1, 1, 2), (2, 1, 0), (3, 2, 2), (4, 2, 0)]
+    if plot_failure:
+        assert next((tmp_path / "batches").glob("*/trajectory_plot_error.json")).is_file()
 
 
 def test_video_encoder_creates_playable_h264_without_simulation(tmp_path):

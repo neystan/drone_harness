@@ -37,6 +37,7 @@ setup(
     install_requires=[
         "setuptools",
         "numpy>=1.24.4,<2",
+        "matplotlib>=3.7,<4",
         "openai>=1.0",
         "opencv-python-headless>=4.8,<5",
         "PyYAML>=6.0",

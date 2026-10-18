@@ -18,6 +18,7 @@ from drone_harness.testing.batch_support import (
     METRICS, ManagedProcess, instruction_text, occupied_sim_ports,
     pending_px4_tcp_restart, save_summary, select_indices, write_json,
 )
+from drone_harness.testing.trajectory_plots import save_batch_plot, save_case_plot
 
 REPO = Path(__file__).resolve().parents[2]
 MAX_CASE_TIMEOUT_S = 40 * 60
@@ -394,10 +395,18 @@ def main(argv: list[str] | None = None) -> int:
                         return 2
                     attempt = len(rows) + 1
                     print(f"batch> [{attempt}/{planned}] 循环 {cycle} case {index}", flush=True)
-                    row = run_case(run_config, episodes[index], index,
-                                   root / f"{attempt:05d}-r{cycle}-case{index}", env)
+                    case_dir = root / f"{attempt:05d}-r{cycle}-case{index}"
+                    row = run_case(run_config, episodes[index], index, case_dir, env)
                     row.update(attempt=attempt, cycle=cycle)
                     rows.append(row)
+                    try:
+                        save_case_plot(case_dir, row, episodes[index])
+                        save_batch_plot(root, rows, episodes)
+                    except Exception as exc:
+                        write_json(root / "trajectory_plot_error.json", {
+                            "attempt": attempt, "case_index": index,
+                            "error_type": type(exc).__name__, "message": str(exc)})
+                        print(f"batch> case {index} 轨迹绘图失败，评分已保留，详见trajectory_plot_error.json。", flush=True)
                     save_summary(root, rows, planned, status)
                     print("batch> " + " ".join(f"{key}={row[key]}" for key in METRICS) +
                           f" end={row['end_reason']}", flush=True)

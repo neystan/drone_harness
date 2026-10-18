@@ -132,13 +132,13 @@ def test_sim_forward_does_not_claim_success_when_offboard_reentry_fails(tmp_path
     hover.assert_called_once_with(controller, action_name="move")
 
 
-def test_sim_only_positive_straight_move_gets_independent_nineteen_meter_cap(
+def test_sim_only_positive_straight_move_gets_independent_thirty_meter_cap(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """仅纯正向可用 19 米，侧移、后退及超限正向仍受原硬限制。"""
+    """仅纯正向可用三十米，侧移、后退及超限正向仍受原硬限制。"""
     context = motion_context(tmp_path)
     controller = context.controller
-    assert flight.move(context, 19.01, 0.0, 0.0)["error"] == "X_OUT_OF_RANGE"
+    assert flight.move(context, 30.01, 0.0, 0.0)["error"] == "X_OUT_OF_RANGE"
     assert flight.move(context, -0.31, 0.0, 0.0)["error"] == "X_OUT_OF_RANGE"
     assert flight.move(context, 1.0, 0.01, 0.0)["error"] == "X_OUT_OF_RANGE"
     assert flight.move(context, 0.0, 0.31, 0.0)["error"] == "Y_OUT_OF_RANGE"
@@ -146,7 +146,7 @@ def test_sim_only_positive_straight_move_gets_independent_nineteen_meter_cap(
 
     monkeypatch.setattr(flight, "_wait_for_valid_position", lambda _controller: True)
     monkeypatch.setattr(flight.time, "sleep", lambda _seconds: None)
-    controller.body_to_ned = Mock(return_value=(19.0, 0.0, 0.0))
-    controller.current_position_ned = Mock(return_value=[19.0, 0.0, -1.0])
-    assert flight.move(context, 19.0, 0.0, 0.0, completion_tolerance_m=0.05)["success"]
-    controller.start_position_hold.assert_called_once_with([19.0, 0.0, -1.0])
+    controller.body_to_ned = Mock(return_value=(30.0, 0.0, 0.0))
+    controller.current_position_ned = Mock(return_value=[30.0, 0.0, -1.0])
+    assert flight.move(context, 30.0, 0.0, 0.0, completion_tolerance_m=0.05)["success"]
+    controller.start_position_hold.assert_called_once_with([30.0, 0.0, -1.0])

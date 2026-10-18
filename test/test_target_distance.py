@@ -44,7 +44,7 @@ def test_invalid_or_saturated_depth_is_unknown(value):
     json.dumps(result, allow_nan=False)
 
 
-@pytest.mark.parametrize('limit,value', [(20, 20), (20, 25), (20, 100), (10, 12)])
+@pytest.mark.parametrize('limit,value', [(20, 20), (20, 25), (20, 100), (10, 12), (30, 30), (30, 35)])
 def test_reliable_far_surface_reports_range_limit_without_exact_distance(limit, value):
     """一致远距单独提示当前上限，不暴露范围外精确距离。"""
     config = replace(observation_config(), depth_max_m=limit)
@@ -138,7 +138,7 @@ def test_measurement_never_captures_or_moves_and_requires_observation(tmp_path):
     assert context.controller.mock_calls == []
 
 
-@pytest.mark.parametrize('distance,reason', [(4, 'OK'), (25, 'OUT_OF_RANGE')])
+@pytest.mark.parametrize('distance,reason', [(4, 'OK'), (25, 'OK'), (29.9, 'OK'), (30, 'OUT_OF_RANGE'), (35, 'OUT_OF_RANGE')])
 def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, monkeypatch, distance, reason):
     """距离与超范围提示均交给下一轮，动作后仍要求重新观察。"""
     wait = Mock(side_effect=lambda *, after_stamp_ns, view="front": fresh_snapshot(after_stamp_ns, distance))
@@ -159,8 +159,9 @@ def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, mo
     agent_loop(client, 'test', [{'role': 'user', 'content': '靠近墙面'}], context)
     feedback = json.loads(client.requests[2][-1]['content'])
     assert feedback['reason'] == reason
-    assert feedback['distance_m'] == (distance if reason == 'OK' else None)
+    assert feedback['distance_m'] == (pytest.approx(distance) if reason == 'OK' else None)
+    assert feedback['max_range_m'] == 30
     if reason == 'OUT_OF_RANGE':
-        assert '20 米测距上限' in feedback['message']
+        assert '30 米测距上限' in feedback['message']
     assert json.loads(client.requests[4][-1]['content'])['reason'] == 'OBSERVATION_REQUIRED'
     wait.assert_called_once()

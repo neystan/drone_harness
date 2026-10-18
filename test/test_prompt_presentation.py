@@ -78,9 +78,9 @@ def test_visual_memory_keeps_detail_and_focuses_on_changes(tmp_path):
     assert "一两句话" not in prompt
 
 
-@pytest.mark.parametrize("name,forward,vertical", [("sim", "19", "10"), ("real", "0.2", "2")])
-def test_schemas_describe_actual_profile_limits(name, forward, vertical):
-    """模型侧中文参数限额跟随当前 profile，实机不误用仿真数值。"""
+@pytest.mark.parametrize("name,forward,vertical", [("sim", "29", "10"), ("real", "0.2", "2")])
+def test_schemas_describe_model_request_limits(name, forward, vertical):
+    """仿真模型侧说明为二十九米，实机沿用自身限额。"""
     profile = load_profile(name, settings_path=Path(__file__).parents[1] / "settings.example.json")
     schemas = {item["function"]["name"]: item["function"] for item in get_tool_schemas(profile)}
     assert f"不超过 {forward} 米" in schemas["forward"]["parameters"]["properties"]["distance_m"]["description"]
@@ -108,7 +108,7 @@ def test_schema_generation_does_not_mutate_shared_definitions(tmp_path):
     assert get_tool_schemas() == before
 
 
-@pytest.mark.parametrize("mode,limit", [("simulation", "19"), ("real", "0.2")])
+@pytest.mark.parametrize("mode,limit", [("simulation", "29"), ("real", "0.2")])
 def test_runtime_sends_profile_specific_schema_to_model(tmp_path, mode, limit):
     """检查实际模型请求中的限额，而不只检查 schema 辅助函数。"""
     context = context_for(tmp_path)
