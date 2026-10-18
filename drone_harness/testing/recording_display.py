@@ -203,6 +203,43 @@ class ConsolePanel:
         return frame
 
 
+class ContextUsagePanel:
+    """显示最近一次已完成请求的输入占用，只在新用量到来时重绘。"""
+
+    HEIGHT = 32
+
+    def __init__(self, width: int):
+        """复用已有中文字体，首轮响应前明确显示等待。"""
+        self.width = width
+        self.font = ConsolePanel(width, self.HEIGHT).font
+        self.text = "上下文（上次请求）：等待模型响应"
+        self.cached = None
+
+    def update(self, event: dict) -> None:
+        """用本次输入数替换旧值，允许清理后下降，不累计历史消耗。"""
+        tokens, limit = event.get("prompt_tokens"), event.get("context_window_tokens")
+        prefix = "上下文（上次请求）："
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
+            text = prefix + "未提供用量"
+        elif isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            text = prefix + f"{tokens:,} tokens · 窗口上限未知"
+        else:
+            text = prefix + f"{tokens:,} / {limit:,} tokens · {tokens / limit:.2%}"
+        if text != self.text:
+            self.text, self.cached = text, None
+
+    def render(self):
+        """预览和录像复用同一行像素，普通帧不重复绘字。"""
+        if self.cached is None:
+            import numpy as np
+            from PIL import Image, ImageDraw
+
+            image = Image.new("RGB", (self.width, self.HEIGHT), (15, 18, 22))
+            ImageDraw.Draw(image).text((8, 5), self.text, font=self.font, fill=(140, 200, 245))
+            self.cached = np.asarray(image)[:, :, ::-1].copy()
+        return self.cached
+
+
 class FrameBuffer:
     """相机后台只覆盖最新帧，不让预览排队播放旧画面。"""
 

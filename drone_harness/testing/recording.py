@@ -63,7 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     from rclpy.signals import SignalHandlerOptions
     from sensor_msgs.msg import Image
     from drone_harness.config.loader import load_profile
-    from drone_harness.testing.recording_display import AsyncVideoWriter, ConsolePanel, CoordinatePanel, FrameBuffer, TextTail
+    from drone_harness.testing.recording_display import (
+        AsyncVideoWriter, ConsolePanel, ContextUsagePanel, CoordinatePanel, FrameBuffer, TextTail,
+    )
 
     root = args.run_dir
     stop = root / "stop.json"
@@ -74,11 +76,14 @@ def main(argv: list[str] | None = None) -> int:
     writer = node = receiver = panel = None
     camera = FrameBuffer()
     coordinates = CoordinatePanel(root / "scene", args.width)
+    context_usage = ContextUsagePanel(args.width + max(640, args.width))
+    header_height = 64 + ContextUsagePanel.HEIGHT
     receive_stop = threading.Event()
     camera_error = []
     raw_console = TextTail(root / "agent.log")
     console_timeline = EventTail(root / "console_timeline.jsonl")
     state_tail = None
+    usage_tail = None
     state = {"current_phase": "waiting"}
     console_offset = 0
     console_captured_ns = 0
@@ -188,19 +193,24 @@ def main(argv: list[str] | None = None) -> int:
                 panel = ConsolePanel(panel_width, panel_height)
                 panel.append("等待原始 agent 输出；上下页键回看，End 回到实时。\n")
                 if args.preview:
-                    cv2.resizeWindow(title, args.width + panel_width, panel_height + 64)
+                    cv2.resizeWindow(title, args.width + panel_width, panel_height + header_height)
             fresh_console = read_console()
             if state_tail is None:
                 sessions = list((root / "agent_logs").glob("session_*"))
                 if len(sessions) == 1:
                     state_tail = EventTail(sessions[0] / "task_state.jsonl")
+                    usage_tail = EventTail(sessions[0] / "context_usage.jsonl")
             if state_tail:
                 for event in state_tail.read():
                     state = event
-            canvas = np.zeros((panel_height + 64, args.width + panel_width, 3), np.uint8)
-            canvas[64:64 + image_height, :args.width] = cv2.resize(frame, (args.width, image_height))
-            canvas[64 + image_height:64 + image_height + 120, :args.width] = coordinates.render()
-            canvas[64:, args.width:] = panel.render(live=True)
+            if usage_tail:
+                for event in usage_tail.read():
+                    context_usage.update(event)
+            canvas = np.zeros((panel_height + header_height, args.width + panel_width, 3), np.uint8)
+            canvas[64:header_height] = context_usage.render()
+            canvas[header_height:header_height + image_height, :args.width] = cv2.resize(frame, (args.width, image_height))
+            canvas[header_height + image_height:header_height + image_height + 120, :args.width] = coordinates.render()
+            canvas[header_height:, args.width:] = panel.render(live=True)
             composed_ns = time.monotonic_ns()
             age_ms = max(0, (composed_ns - frame_info["camera_receive_monotonic_ns"]) / 1e6)
             frame_ages.append(age_ms)
@@ -224,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
                 preview = canvas
                 if panel.offset:
                     preview = canvas.copy()
-                    preview[64:, args.width:] = panel.render()
+                    preview[header_height:, args.width:] = panel.render()
                 cv2.imshow(title, preview)
                 preview_count += 1
                 key = cv2.waitKeyEx(1)
@@ -253,13 +263,17 @@ def main(argv: list[str] | None = None) -> int:
                 if not console_closed:
                     time.sleep(0.01)
             read_console()
+            if usage_tail:
+                for event in usage_tail.read():
+                    context_usage.update(event)
             snapshot = camera.get()
             if snapshot is not None:
                 frame, frame_info = snapshot
                 canvas = canvas.copy()
-                canvas[64:64 + image_height, :args.width] = cv2.resize(frame, (args.width, image_height))
-                canvas[64 + image_height:64 + image_height + 120, :args.width] = coordinates.render(refresh=True)
-                canvas[64:, args.width:] = panel.render(live=True)
+                canvas[64:header_height] = context_usage.render()
+                canvas[header_height:header_height + image_height, :args.width] = cv2.resize(frame, (args.width, image_height))
+                canvas[header_height + image_height:header_height + image_height + 120, :args.width] = coordinates.render(refresh=True)
+                canvas[header_height:, args.width:] = panel.render(live=True)
                 composed_ns = time.monotonic_ns()
                 age_ms = max(0, (composed_ns - frame_info["camera_receive_monotonic_ns"]) / 1e6)
                 cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 31), (0, 0, 0), -1)

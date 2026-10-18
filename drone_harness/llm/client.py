@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import MutableMapping
 from typing import Any
+from urllib.parse import urlparse
 
 from drone_harness.config.schema import RuntimeProfile
 
@@ -17,6 +18,14 @@ PROXY_ENVIRONMENT_VARIABLES = (
     "https_proxy",
     "all_proxy",
 )
+
+
+def model_context_window_tokens(model: str, base_url: str) -> int | None:
+    """只返回已核实的官方模型窗口，未知服务或模型不推断。"""
+    if urlparse(base_url).hostname == "open.bigmodel.cn" and model == "glm-5.3-flash":
+        # 官方 1M 窗口数值：https://huggingface.co/zai-org/GLM-5.3-Flash-BF16/blob/main/config.json
+        return 1_048_576
+    return None
 
 
 def normalize_proxy_environment(

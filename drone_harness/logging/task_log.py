@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from drone_harness.config.schema import RuntimeProfile
+from drone_harness.llm.client import model_context_window_tokens
 from drone_harness.runtime.navigation import NavigationPlan
 from drone_harness.runtime.task_state import TaskState
 
@@ -79,6 +80,22 @@ def log_agent_message(
     }
     try:
         append_jsonl(str(_session_log_dir(profile, session_id)), "agent_messages.jsonl", event)
+    except OSError:
+        pass
+
+
+def log_context_usage(profile: RuntimeProfile, session_id: str, model: str, usage: Any) -> None:
+    """记录单次响应的实际输入用量，缺失时清空数值且不影响导航。"""
+    tokens = getattr(usage, "prompt_tokens", None)
+    if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
+        tokens = None
+    event = {
+        "timestamp": _timestamp(), "profile_name": profile.name, "event_type": "context_usage",
+        "model": model, "prompt_tokens": tokens,
+        "context_window_tokens": model_context_window_tokens(model, profile.llm.base_url),
+    }
+    try:
+        append_jsonl(str(_session_log_dir(profile, session_id)), "context_usage.jsonl", event)
     except OSError:
         pass
 

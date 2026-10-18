@@ -9,7 +9,7 @@ from typing import Any
 
 from drone_harness.bus.intervention import interrupt_if_requested
 from drone_harness.logging.task_log import (
-    log_agent_message, log_navigation_plan, log_observation, log_task_state, log_tool_call,
+    log_agent_message, log_context_usage, log_navigation_plan, log_observation, log_task_state, log_tool_call,
     save_observation_image,
 )
 from drone_harness.runtime.navigation import (
@@ -90,6 +90,7 @@ def _run_agent_loop(
                 tool_choice="auto",
                 temperature=0.0,
             )
+            log_context_usage(context.profile, context.session_id, model, getattr(response, "usage", None))
             message = response.choices[0].message
             tool_calls = message.tool_calls or []
         except Exception as exc:

@@ -278,11 +278,13 @@ def test_video_encoder_creates_playable_h264_without_simulation(tmp_path):
     assert path.stat().st_size > 1000
 
 
-def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monkeypatch):
-    """用内存相机消息验证真正的叠加与编码路径，不启动 ROS 或窗口。"""
+@pytest.mark.parametrize("preview", [False, True])
+def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monkeypatch, preview):
+    """用内存相机验证预览、录像及末帧上下文，不启动 ROS 或真实窗口。"""
     import sys
     import time
     from drone_harness.testing import recording
+    from drone_harness.testing.recording_display import AsyncVideoWriter, ContextUsagePanel
     from drone_harness.testing.video import ffmpeg_executable
     try:
         ffmpeg_executable()
@@ -294,6 +296,28 @@ def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monke
     session.mkdir(parents=True)
     (session / "task_state.jsonl").write_text(json.dumps({"current_phase": "tool_running",
         "active_tool_name": "forward", "active_tool_arguments": {"distance_m": 5}}) + "\n")
+    usage_file = session / "context_usage.jsonl"
+    usage_file.write_text(json.dumps({"prompt_tokens": 400000, "context_window_tokens": 1048576}) + "\n")
+    captured = {}
+    original_submit = AsyncVideoWriter.submit
+
+    def capture_video(writer, frame, metadata):
+        """保留编码前首末画面，核对精确像素而不依赖有损编码。"""
+        captured.setdefault("first_video", frame.copy())
+        captured["last_video"] = frame.copy()
+        return original_submit(writer, frame, metadata)
+
+    def capture_preview(title, frame):
+        """收集预览像素，避免创建桌面窗口。"""
+        captured.setdefault("first_preview", frame.copy())
+
+    monkeypatch.setattr(AsyncVideoWriter, "submit", capture_video)
+    import cv2
+    for name in ("namedWindow", "resizeWindow", "destroyAllWindows"):
+        monkeypatch.setattr(cv2, name, lambda *args: None)
+    monkeypatch.setattr(cv2, "imshow", capture_preview)
+    monkeypatch.setattr(cv2, "waitKeyEx", lambda delay: -1)
+    monkeypatch.setattr(cv2, "getWindowProperty", lambda *args: 1)
     calls = []
     class Node:
         def create_subscription(self, msg_type, topic, callback, qos):
@@ -314,6 +338,8 @@ def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monke
             (tmp_path / "console_timeline.jsonl").write_text(json.dumps({
                 "captured_monotonic_ns": time.monotonic_ns(), "console_closed": True,
                 "text": "state> tool_failed forward error=MOVE_TIMEOUT\nagent> 本轮停止。\n"}) + "\n")
+            with usage_file.open("a") as handle:
+                handle.write(json.dumps({"prompt_tokens": 100000, "context_window_tokens": 1048576}) + "\n")
             write_json(tmp_path / "stop.json", {"end_reason": "offline_test_end"})
     fake_ros = SimpleNamespace(init=lambda **kwargs: None, create_node=lambda name: node,
                               spin_once=spin_once, ok=lambda: True, shutdown=lambda: None)
@@ -324,12 +350,20 @@ def test_recorder_renders_received_frames_and_tool_state_offline(tmp_path, monke
     monkeypatch.setitem(sys.modules, "sensor_msgs.msg", SimpleNamespace(Image=object))
     import drone_harness.config.loader as loader
     monkeypatch.setattr(loader, "load_profile", lambda name: SimpleNamespace(ros=SimpleNamespace(camera_scene_topic="/test")))
-    assert recording.main(["--run-dir", str(tmp_path), "--width", "160", "--record"]) == 0
+    assert recording.main(["--run-dir", str(tmp_path), "--width", "160", "--record",
+                           *(["--preview"] if preview else [])]) == 0
     metadata = json.loads((tmp_path / "recording.json").read_text())
     assert metadata["frames"] >= 2 and metadata["bytes"] > 1000 and metadata["error"] is None
     assert (tmp_path / "recorder_ready.json").is_file() and "destroyed" in calls
     frames = [json.loads(line) for line in (tmp_path / "frame_timeline.jsonl").read_text().splitlines()]
     assert frames[-1]["console_offset"] == (tmp_path / "console_timeline.jsonl").stat().st_size
+    expected = ContextUsagePanel(800)
+    expected.update({"prompt_tokens": 400000, "context_window_tokens": 1048576})
+    assert np.array_equal(captured["first_video"][64:96], expected.render())
+    expected.update({"prompt_tokens": 100000, "context_window_tokens": 1048576})
+    assert np.array_equal(captured["last_video"][64:96], expected.render())
+    if preview:
+        assert np.array_equal(captured["first_preview"][64:96], captured["first_video"][64:96])
 
 
 @pytest.mark.parametrize("mode", ["normal", "crash", "timeout"])
