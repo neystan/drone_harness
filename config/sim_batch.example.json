@@ -2,7 +2,7 @@
   "cases": "351,397,485",
   "scenes": [9, 13, 21, 24],
   "repeat": 1,
-  "case_timeout_s": 2400,
+  "case_timeout_s": 2700,
   "startup_timeout_s": 120,
   "record": true,
   "preview": true,
