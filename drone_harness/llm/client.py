@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from drone_harness.config.schema import RuntimeProfile
+from drone_harness.llm.request_trace import record_http_request, record_http_response
 
 
 PROXY_ENVIRONMENT_VARIABLES = (
@@ -47,8 +48,11 @@ def create_llm_client(profile: RuntimeProfile) -> Any:
         api_key=profile.llm.api_key,
         base_url=normalize_chat_base_url(profile.llm.base_url),
         timeout=600.0,
-        max_retries=0,
-        http_client=DefaultHttpxClient(trust_env=False, timeout=600.0),
+        max_retries=profile.llm.max_retries,
+        http_client=DefaultHttpxClient(
+            trust_env=False, timeout=600.0,
+            event_hooks={"request": [record_http_request], "response": [record_http_response]},
+        ),
     )
 
 

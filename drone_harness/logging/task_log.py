@@ -102,7 +102,8 @@ def log_context_usage(profile: RuntimeProfile, session_id: str, model: str, usag
 
 def log_model_request(profile: RuntimeProfile, session_id: str, model: str, request_id: str,
                       status: str, image_count: int, *, elapsed_s: float | None = None,
-                      usage: Any = None, error_type: str | None = None) -> None:
+                      usage: Any = None, error_type: str | None = None,
+                      request_details: dict[str, Any] | None = None) -> None:
     """记录请求起止、耗时和同次用量，不保存消息、图片或异常正文。"""
     event = {
         "timestamp": _timestamp(), "profile_name": profile.name, "event_type": "model_request",
@@ -112,6 +113,9 @@ def log_model_request(profile: RuntimeProfile, session_id: str, model: str, requ
     for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
         value = getattr(usage, name, None)
         event[name] = value if type(value) is int and value >= 0 else None
+    if request_details is not None:
+        for name in ("attempt_count", "attempts", "http_status", "provider_error_code", "provider_request_id"):
+            event[name] = request_details[name]
     try:
         append_jsonl(str(_session_log_dir(profile, session_id)), "model_requests.jsonl", event)
     except OSError:

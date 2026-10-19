@@ -109,6 +109,7 @@ class ProviderConfig:
     base_url: str
     model: str
     api_key: str
+    max_retries: int = 2
 
     def __post_init__(self) -> None:
         """校验唯一 VLM 的接口、型号和密钥。"""
@@ -118,6 +119,8 @@ class ProviderConfig:
             raise ValueError("provider model is required")
         if not self.api_key:
             raise ValueError("provider api_key is required")
+        if type(self.max_retries) is not int or self.max_retries < 0:
+            raise ValueError("llm.max_retries must be a non-negative integer")
 
 
 @dataclass(frozen=True)

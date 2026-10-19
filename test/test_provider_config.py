@@ -46,8 +46,8 @@ def test_single_provider_accepts_ephemeral_environment_override(tmp_path: Path, 
     assert not hasattr(profile, "tracker")
 
 
-def test_client_uses_only_one_model_base_url_without_retry(monkeypatch) -> None:
-    """正式客户端把完整 URL 归一化且不以重试拖长盲等待。"""
+def test_client_uses_only_one_model_base_url_with_configured_retries(monkeypatch) -> None:
+    """正式客户端把完整URL归一化，并向SDK传递唯一重试预算。"""
     import openai
     from drone_harness.llm.client import create_llm_client
 
@@ -66,6 +66,28 @@ def test_client_uses_only_one_model_base_url_without_retry(monkeypatch) -> None:
     create_llm_client(profile)
     assert len(captured) == 1
     assert captured[0]["base_url"] == "https://open.bigmodel.cn/api/paas/v4"
-    assert captured[0]["max_retries"] == 0
+    assert captured[0]["max_retries"] == 2
     assert captured[0]["http_client"].trust_env is False
     captured[0]["http_client"].close()
+
+
+@pytest.mark.parametrize('value', [True, -1, 1.5, '2', None])
+def test_retry_budget_rejects_invalid_config(tmp_path, value):
+    """重试次数只接受非负整数，避免布尔值或字符串隐式生效。"""
+    settings = {'llm': {'api_key': 'offline', 'base_url': 'https://offline.invalid',
+                        'model': 'test', 'max_retries': value}}
+    path = tmp_path/'settings.json'
+    path.write_text(json.dumps(settings))
+    with pytest.raises(ConfigError, match='max_retries'):
+        load_profile('sim', settings_path=path)
+
+
+@pytest.mark.parametrize('value', [None, 0, 2])
+def test_retry_budget_default_and_override(tmp_path, value):
+    """旧配置使用默认两次，显式零值可关闭请求重试。"""
+    llm = {'api_key': 'offline', 'base_url': 'https://offline.invalid', 'model': 'test'}
+    if value is not None:
+        llm['max_retries'] = value
+    path = tmp_path/'settings.json'
+    path.write_text(json.dumps({'llm': llm}))
+    assert load_profile('sim', settings_path=path).llm.max_retries == (2 if value is None else value)

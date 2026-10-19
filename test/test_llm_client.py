@@ -25,7 +25,7 @@ def test_client_ignores_environment_proxies_without_mutation(monkeypatch, profil
     with create_llm_client(profile) as client:
         assert client._client.trust_env is False
         assert client.timeout == 600.0
-        assert client.max_retries == 0
+        assert client.max_retries == 2
         assert str(client.base_url) == "https://example.invalid/v1/"
     assert dict(os.environ) == before
 

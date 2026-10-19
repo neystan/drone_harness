@@ -9,6 +9,7 @@ from time import monotonic_ns, perf_counter
 from typing import Any
 
 from drone_harness.bus.intervention import interrupt_if_requested
+from drone_harness.llm.request_trace import trace_model_request
 from drone_harness.logging.task_log import (
     log_agent_message, log_context_usage, log_model_request, log_navigation_plan,
     log_observation, log_task_state, log_tool_call,
@@ -90,22 +91,28 @@ def _run_agent_loop(
                               if isinstance(item.get("content"), list) for part in item["content"])
             request_id = f"request-{monotonic_ns()}"
             log_model_request(context.profile, context.session_id, model, request_id, "started", image_count)
-            started = perf_counter()
-            try:
-                response = client.chat.completions.create(
-                    model=model, messages=request_messages,
-                    tools=get_tool_schemas(context.profile, navigation_enabled=navigation_enabled),
-                    tool_choice="auto", temperature=0.0,
-                )
-            except BaseException as exc:
-                log_model_request(context.profile, context.session_id, model, request_id, "failed", image_count,
-                                  elapsed_s=perf_counter() - started, error_type=type(exc).__name__)
-                raise
-            log_model_request(context.profile, context.session_id, model, request_id, "completed", image_count,
-                              elapsed_s=perf_counter() - started, usage=getattr(response, "usage", None))
+            with trace_model_request(context.profile.llm.api_key,
+                                     before_retry=lambda: _check_retry_interruption(context)) as trace:
+                started = perf_counter()
+                try:
+                    response = client.chat.completions.create(
+                        model=model, messages=request_messages,
+                        tools=get_tool_schemas(context.profile, navigation_enabled=navigation_enabled),
+                        tool_choice="auto", temperature=0.0,
+                    )
+                except BaseException as exc:
+                    log_model_request(context.profile, context.session_id, model, request_id, "failed", image_count,
+                                      elapsed_s=perf_counter() - started, error_type=type(exc).__name__,
+                                      request_details=trace.details(error=exc))
+                    raise
+                log_model_request(context.profile, context.session_id, model, request_id, "completed", image_count,
+                                  elapsed_s=perf_counter() - started, usage=getattr(response, "usage", None),
+                                  request_details=trace.details(response=response))
             log_context_usage(context.profile, context.session_id, model, getattr(response, "usage", None))
             message = response.choices[0].message
             tool_calls = message.tool_calls or []
+        except EndCurrentTurn as exc:
+            return _stop_with_message(context, str(exc), safety_stop=True)
         except Exception as exc:
             return _stop_with_message(context, f"模型请求或响应失败，已停止本轮：{type(exc).__name__}",
                                       safety_stop=True)
@@ -266,6 +273,13 @@ def _run_agent_loop(
 
     text = "导航模型请求预算耗尽，任务未完成，已停止。" if plan is not None else "本轮工具调用次数过多，已停止。"
     return _stop_with_message(context, text, safety_stop=True)
+
+
+def _check_retry_interruption(context: ToolContext) -> None:
+    """每次SDK重试发送前优先处理已到达的用户介入。"""
+    interruption = interrupt_if_requested(context, hover_on_flight_tool=False)
+    if interruption is not None:
+        raise EndCurrentTurn(interruption['message'], interruption)
 
 
 def _navigation_observation_current(context: ToolContext) -> bool:
