@@ -226,7 +226,9 @@ def _run_interactive_loop(
         print("输入自然语言与 agent 对话，输入 exit 退出。")
     _record_task_state(context)
 
-    conversation: list[dict[str, str]] = []
+    from drone_harness.llm.messages import assistant_history_message
+
+    conversation: list[dict[str, Any]] = []
     while True:
         if context.task_state is not None and context.task_state.intervention_pending:
             user_input = context.task_state.intervention_message or ""
@@ -275,11 +277,12 @@ def _run_interactive_loop(
         turn_start = len(messages)
         log_agent_message(context.profile, context.session_id, "user", user_input)
         answer = agent_loop(client, model, messages, context)
-        # 跨轮只带用户与 AI 文字，不带工具协议、执行结果或相机观测。
+        # 跨轮保留普通回复的推理，旧工具协议和对应推理一起清理。
         for message in messages[turn_start:]:
-            content = message.get("content")
-            if message.get("role") == "assistant" and isinstance(content, str) and content:
-                conversation.append({"role": "assistant", "content": content})
+            if message.get("role") == "assistant":
+                text_message = assistant_history_message(message)
+                if text_message is not None:
+                    conversation.append(text_message)
         # 降落、失败和中断的返回说明未必已加入 messages，也需留给下轮。
         last = messages[-1]
         if isinstance(answer, str) and answer and not (

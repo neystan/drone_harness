@@ -114,8 +114,10 @@ def log_model_request(profile: RuntimeProfile, session_id: str, model: str, requ
         value = getattr(usage, name, None)
         event[name] = value if type(value) is int and value >= 0 else None
     if request_details is not None:
-        for name in ("attempt_count", "attempts", "http_status", "provider_error_code", "provider_request_id"):
-            event[name] = request_details[name]
+        for name in ("attempt_count", "attempts", "http_status", "provider_error_code", "provider_request_id",
+                     "reasoning_history_chars", "reasoning_sent", "reasoning_input_chars", "reasoning_output_chars"):
+            if name in request_details:
+                event[name] = request_details[name]
     try:
         append_jsonl(str(_session_log_dir(profile, session_id)), "model_requests.jsonl", event)
     except OSError:

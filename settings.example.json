@@ -3,6 +3,7 @@
     "api_key": "replace-with-your-llm-key",
     "base_url": "https://open.bigmodel.cn/api/paas/v4",
     "model": "glm-5.3-flash",
-    "max_retries": 2
+    "max_retries": 2,
+    "reasoning_content_mode": "auto"
   }
 }

@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from drone_harness.llm.messages import assistant_history_message
 from drone_harness.llm.prompts import (
     LANDMARK_OBSERVATION_PROMPT, NAVIGATION_EXECUTION_PROMPT,
     PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
@@ -177,8 +178,9 @@ def compact_navigation_history(messages: list[dict[str, Any]], task_start: int,
         if message["role"] == "tool":
             continue
         if message["role"] == "assistant":
-            if message.get("content"):
-                retained.append({"role": "assistant", "content": message["content"]})
+            text_message = assistant_history_message(message)
+            if text_message is not None:
+                retained.append(text_message)
         elif message is latest:
             # 保留最新图用于历史对照，但不能让失效深度冒充当前位置的测量。
             if observation_current:

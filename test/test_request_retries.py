@@ -30,17 +30,18 @@ def client_factory(monkeypatch):
     """只替换HTTP传输，保留生产客户端的SDK参数和钩子。"""
     original = openai.DefaultHttpxClient
 
-    def build(context, handler, max_retries=2):
+    def build(context, handler, max_retries=2, **provider_options):
         """为一次离线测试创建带原始生产钩子的客户端。"""
         def http_client(**options):
             """让所有HTTP尝试都进入内存响应器。"""
             return original(transport=httpx2.MockTransport(handler), **options)
 
         monkeypatch.setattr(openai, 'DefaultHttpxClient', http_client)
+        provider = dict(api_key='offline-test-key', base_url='https://offline.invalid/v4',
+                        model='test-model', max_retries=max_retries)
+        provider.update(provider_options)
         context.profile = replace(context.profile, post_motion_wait_enabled=False,
-                                  llm=replace(context.profile.llm, api_key='offline-test-key',
-                                              base_url='https://offline.invalid/v4',
-                                              model='test-model', max_retries=max_retries))
+                                  llm=replace(context.profile.llm, **provider))
         return create_llm_client(context.profile)
 
     return build

@@ -9,6 +9,9 @@ from time import monotonic_ns, perf_counter
 from typing import Any
 
 from drone_harness.bus.intervention import interrupt_if_requested
+from drone_harness.llm.messages import (
+    build_assistant_message, prepare_model_messages, reasoning_request_details, response_reasoning_chars,
+)
 from drone_harness.llm.request_trace import trace_model_request
 from drone_harness.logging.task_log import (
     log_agent_message, log_context_usage, log_model_request, log_navigation_plan,
@@ -87,10 +90,13 @@ def _run_agent_loop(
         try:
             request_messages = (navigation_messages(messages, plan, observation_current=_navigation_observation_current(context))
                                 if navigation_enabled else messages)
+            request_messages = prepare_model_messages(request_messages, context.profile.llm, model)
+            reasoning_details = reasoning_request_details(messages, request_messages)
             image_count = sum(part.get("type") == "image_url" for item in request_messages
                               if isinstance(item.get("content"), list) for part in item["content"])
             request_id = f"request-{monotonic_ns()}"
-            log_model_request(context.profile, context.session_id, model, request_id, "started", image_count)
+            log_model_request(context.profile, context.session_id, model, request_id, "started", image_count,
+                              request_details=reasoning_details)
             with trace_model_request(context.profile.llm.api_key,
                                      before_retry=lambda: _check_retry_interruption(context)) as trace:
                 started = perf_counter()
@@ -103,11 +109,12 @@ def _run_agent_loop(
                 except BaseException as exc:
                     log_model_request(context.profile, context.session_id, model, request_id, "failed", image_count,
                                       elapsed_s=perf_counter() - started, error_type=type(exc).__name__,
-                                      request_details=trace.details(error=exc))
+                                      request_details={**trace.details(error=exc), **reasoning_details})
                     raise
                 log_model_request(context.profile, context.session_id, model, request_id, "completed", image_count,
                                   elapsed_s=perf_counter() - started, usage=getattr(response, "usage", None),
-                                  request_details=trace.details(response=response))
+                                  request_details={**trace.details(response=response), **reasoning_details,
+                                                   'reasoning_output_chars': response_reasoning_chars(response)})
             log_context_usage(context.profile, context.session_id, model, getattr(response, "usage", None))
             message = response.choices[0].message
             tool_calls = message.tool_calls or []
@@ -131,8 +138,7 @@ def _run_agent_loop(
             return _stop_with_message(context, "模型文本响应结构无效，已停止本轮。", safety_stop=True)
         record_target_assessment(context, assistant_text, has_current_image=has_current_image)
         display_text = assistant_text
-        messages.append(_assistant_tool_message(message, tool_calls) if tool_calls else
-                        {"role": "assistant", "content": assistant_text})
+        messages.append(build_assistant_message(message, tool_calls))
         if display_text:
             print(f"agent> {display_text}")
             log_agent_message(context.profile, context.session_id, "assistant", display_text)
@@ -334,19 +340,6 @@ def append_observation(
                     view=snapshot.view,
                     down_rgb_stamp_ns=(snapshot.down_rgb.stamp_ns if snapshot.down_rgb is not None else
                                        snapshot.rgb_stamp_ns if snapshot.view == "down" else None))
-
-
-def _assistant_tool_message(message: Any, tool_calls: list[Any]) -> dict[str, Any]:
-    """完整保留一个模型回复中的工具调用，保证后续结果可配对。"""
-    return {
-        "role": "assistant",
-        "content": message.content or "",
-        "tool_calls": [
-            {"id": call.id, "type": "function",
-             "function": {"name": call.function.name, "arguments": call.function.arguments}}
-            for call in tool_calls
-        ],
-    }
 
 
 def _compact_history(messages: list[dict[str, Any]], *, keep_latest: bool = True) -> None:

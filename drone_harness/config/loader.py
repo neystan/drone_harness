@@ -155,6 +155,7 @@ def _build_profile(raw: dict[str, Any], settings: dict[str, Any]) -> RuntimeProf
             model=llm_model,
             api_key=llm_api_key,
             max_retries=llm_settings.get("max_retries", 2),
+            reasoning_content_mode=llm_settings.get("reasoning_content_mode", "auto"),
         ),
         safety=SafetyConfig(
             human_in_the_loop_for_flight_tools=bool(

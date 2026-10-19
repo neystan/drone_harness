@@ -110,6 +110,7 @@ class ProviderConfig:
     model: str
     api_key: str
     max_retries: int = 2
+    reasoning_content_mode: str = "auto"
 
     def __post_init__(self) -> None:
         """校验唯一 VLM 的接口、型号和密钥。"""
@@ -121,6 +122,8 @@ class ProviderConfig:
             raise ValueError("provider api_key is required")
         if type(self.max_retries) is not int or self.max_retries < 0:
             raise ValueError("llm.max_retries must be a non-negative integer")
+        if self.reasoning_content_mode not in ("auto", "on", "off"):
+            raise ValueError("llm.reasoning_content_mode must be auto, on or off")
 
 
 @dataclass(frozen=True)
