@@ -130,10 +130,10 @@ def test_measurement_never_captures_or_moves_and_requires_observation(tmp_path):
     """测距只读现有帧，未观察时让模型重新观察。"""
     context = context_for(tmp_path, Mock())
     handler = get_tool_definition('measure_distance').handler
-    result = handler(context, {'x': .5, 'y': .5})
+    result = handler(context, {'target': '目标实体表面', 'x': .5, 'y': .5})
     assert result['success'] and not result['valid'] and result['reason'] == 'OBSERVATION_REQUIRED'
     context.observation = snapshot_at()
-    result = handler(context, {'x': .5, 'y': .5})
+    result = handler(context, {'target': '目标实体表面', 'x': .5, 'y': .5})
     assert result['valid'] and result['observation_id'] == context.observation.observation_id
     assert context.controller.mock_calls == []
 
@@ -151,8 +151,8 @@ def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, mo
         return {'success': True, 'degrees': 90} if call.function.name == 'rotate' else original_dispatch(current, call)
 
     monkeypatch.setattr(loop_module, 'dispatch_tool_call', dispatch)
-    calls = [('observe', {'prompt': '检查墙面'}), ('measure_distance', {'x': .5, 'y': .5}),
-             ('rotate', {'direction': 'right', 'degrees': 90}), ('measure_distance', {'x': .5, 'y': .5})]
+    calls = [('observe', {'prompt': '检查墙面'}), ('measure_distance', {'target': '目标实体表面', 'x': .5, 'y': .5}),
+             ('rotate', {'direction': 'right', 'degrees': 90}), ('measure_distance', {'target': '目标实体表面', 'x': .5, 'y': .5})]
     client = FakeClient([SimpleNamespace(content='', tool_calls=[tool_call(name, args, str(index))])
                          for index, (name, args) in enumerate(calls)] +
                         [SimpleNamespace(content='需要重新观察', tool_calls=[])])

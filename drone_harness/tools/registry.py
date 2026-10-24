@@ -11,6 +11,7 @@ from drone_harness.runtime.navigation import NavigationPlan, update_navigation_p
 from drone_harness.runtime.observation import ObservationSnapshot, observation_request_time_ns
 from drone_harness.runtime.task_state import TaskState
 from drone_harness.runtime.reflection import clear_target_assessment
+from drone_harness.runtime.target_measurement import clear_target_measurement, record_target_measurement
 from drone_harness.vision.depth_rules import DepthRules, compute_depth_rules, invalid_depth_rules
 from drone_harness.vision.target_distance import measure_target_distance
 from . import flight
@@ -51,6 +52,9 @@ class ToolContext:
     search_observations: list[ObservationSnapshot] | None = None
     target_assessment: dict[str, str] | None = None
     target_assessment_goal: tuple[str, ...] | None = None
+    latest_target_measurement: dict[str, Any] | None = None
+    target_measurement_goal: tuple[str, ...] | None = None
+    target_measurement_observation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +106,7 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
     context.observation = None
     context.depth_rules = None
     clear_target_assessment(context)
+    clear_target_measurement(context)
     if context.task_state is not None:
         context.task_state.clear_observation()
     view = arguments.get("view", "front")
@@ -159,9 +164,17 @@ def _observe_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
 
 
 def _measure_distance_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:
-    """只测量模型已看到且尚未因动作失效的前视观察。"""
-    return measure_target_distance(context.observation, context.profile.observation,
-                                   arguments.get("x"), arguments.get("y"))
+    """测量当前前视选点，保留目标说明及绑定来源的真实结果。"""
+    target = arguments.get("target")
+    if not isinstance(target, str) or not 1 <= len(target.strip()) <= 1000:
+        clear_target_measurement(context)
+        return {"success": False, "valid": False, "distance_m": None, "reason": "INVALID_TARGET",
+                "message": "target 必须是去掉首尾空白后1到1000字符的参照物及可见表面说明"}
+    target = target.strip()
+    x, y = arguments.get("x"), arguments.get("y")
+    result = measure_target_distance(context.observation, context.profile.observation, x, y)
+    record_target_measurement(context, target, x, y, result)
+    return {**result, "target": target}
 
 
 def _activate_skill_handler(context: ToolContext, arguments: dict[str, Any]) -> dict:

@@ -18,6 +18,7 @@ from drone_harness.llm.client import create_llm_client
 from drone_harness.llm.prompts import build_system_prompt
 from drone_harness.runtime.task_state import TaskState, format_task_state_line
 from drone_harness.runtime.task_memory import input_directive, prepare_navigation_turn
+from drone_harness.runtime.target_measurement import clear_target_measurement
 from drone_harness.runtime.safety import SafetyHandoffRequired
 from drone_harness.runtime.terminal import open_input_terminal
 from drone_harness.tools.registry import ToolContext
@@ -253,6 +254,7 @@ def _run_interactive_loop(
             context.navigation_resumable = False
             context.target_assessment = None
             context.target_assessment_goal = None
+            clear_target_measurement(context)
             # 明确取消或替换时隔离旧任务对话，避免模型从旧文字自行恢复。
             conversation.clear()
             if directive == "cancel":

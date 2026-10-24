@@ -29,6 +29,7 @@ from drone_harness.runtime.reflection import (
 )
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.runtime.task_memory import is_recoverable_rejection
+from drone_harness.runtime.target_measurement import clear_target_measurement, target_measurement_snapshot
 from drone_harness.runtime.tool_dispatcher import dispatch_tool_call
 from drone_harness.tools.registry import ToolContext, get_tool_schemas
 from drone_harness.vision.depth_rules import compute_depth_rules
@@ -88,7 +89,9 @@ def _run_agent_loop(
             and item["content"][0].get("text", "").startswith(SEARCH_MARKER)
             for item in messages)
         try:
-            request_messages = (navigation_messages(messages, plan, observation_current=_navigation_observation_current(context))
+            request_messages = (navigation_messages(
+                messages, plan, observation_current=_navigation_observation_current(context),
+                latest_target_measurement=target_measurement_snapshot(context))
                                 if navigation_enabled else messages)
             request_messages = prepare_model_messages(request_messages, context.profile.llm, model)
             reasoning_details = reasoning_request_details(messages, request_messages)
@@ -194,6 +197,7 @@ def _run_agent_loop(
         view_changed = bool(tool_result.get("success")) and _motion_changed_view(call.function.name, tool_result)
         if view_changed:
             clear_target_assessment(context)
+            clear_target_measurement(context)
             if context.profile.post_motion_wait_enabled:
                 # 仅暂停规划线程，ROS executor 继续收数据、发布 setpoint。
                 wait_s = context.profile.post_motion_wait_s
@@ -219,6 +223,7 @@ def _run_agent_loop(
                 context.task_state.completion_candidate = None
             continue
         if call.function.name == "observe" and not tool_result.get("success"):
+            clear_target_measurement(context)
             context.observation = None
             context.depth_rules = None
             if context.task_state is not None:
@@ -244,6 +249,7 @@ def _run_agent_loop(
         if view_changed or call.function.name == "land":
             corrections = 0
         if call.function.name == "land":
+            clear_target_measurement(context)
             context.navigation_resumable = False
             if plan is not None:
                 completed = plan.status == "finishing"
@@ -259,6 +265,7 @@ def _run_agent_loop(
             try:
                 append_observation(context, messages, snapshot, prompt=tool_result.get("prompt"), rules=rules)
             except Exception:
+                clear_target_measurement(context)
                 context.observation = None
                 context.depth_rules = None
                 return _stop_with_message(context, "observe 图像无效，已停止本轮。", safety_stop=True)

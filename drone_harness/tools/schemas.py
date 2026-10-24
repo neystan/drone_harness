@@ -128,16 +128,18 @@ MEASURE_DISTANCE_TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "measure_distance",
-        "description": "以接近完成子目标或核实最终参照物时须实际测距；常规前进无需先测距。只读最新前视选点的配对深度，不移动；动作后先 observe。返回射线距离与有效性，不自动判定目标身份或到达。",
+        "description": "以接近完成子目标或核实最终参照物时须实际测距；常规前进无需先测距。target说明所选参照物及表面，程序不据此确认身份。只读最新前视配对深度，不移动；动作后先 observe。返回实际射线距离与有效性，不自动判定到达。",
         "parameters": {
             "type": "object", "additionalProperties": False,
             "properties": {
+                "target": {"type": "string", "minLength": 1, "maxLength": 1000,
+                           "description": "所测参照物实例及可见表面，例如指定白色集装箱朝向无人机的正面；不得以附近障碍或旧地标替代。"},
                 "x": {"type": "number", "minimum": 0, "maximum": 1,
                       "description": "图像左侧为 0、右侧为 1；选择目标实体表面内部，避开边缘和门洞。"},
                 "y": {"type": "number", "minimum": 0, "maximum": 1,
                       "description": "图像顶部为 0、底部为 1。"},
             },
-            "required": ["x", "y"],
+            "required": ["target", "x", "y"],
         },
     },
 }

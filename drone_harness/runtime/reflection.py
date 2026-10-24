@@ -4,8 +4,8 @@ import json
 from typing import Any
 
 
-def _goal_key(context: Any) -> tuple[str, ...]:
-    """用当前任务及子目标内容隔离临时判断，避免串到下一目标。"""
+def current_goal_key(context: Any) -> tuple[str, ...]:
+    """用当前任务及子目标内容隔离临时判断与实际测距。"""
     plan = context.navigation_plan
     current = plan.current if plan is not None else None
     if current is not None:
@@ -21,7 +21,7 @@ def clear_target_assessment(context: Any) -> None:
 
 def discard_stale_target_assessment(context: Any) -> None:
     """子目标切换或内容变化后停止使用此前判断。"""
-    if getattr(context, "target_assessment_goal", None) != _goal_key(context):
+    if getattr(context, "target_assessment_goal", None) != current_goal_key(context):
         clear_target_assessment(context)
 
 
@@ -44,4 +44,4 @@ def record_target_assessment(context: Any, text: str, *, has_current_image: bool
             or not isinstance(value["message"], str) or not value["message"].strip()):
         return
     context.target_assessment = {"target_status": value["target_status"], "message": value["message"].strip()}
-    context.target_assessment_goal = _goal_key(context)
+    context.target_assessment_goal = current_goal_key(context)

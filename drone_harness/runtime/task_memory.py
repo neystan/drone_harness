@@ -2,6 +2,7 @@
 
 from typing import Any
 from drone_harness.runtime.reflection import clear_target_assessment
+from drone_harness.runtime.target_measurement import clear_target_measurement
 
 
 def is_recoverable_rejection(tool: str, result: dict[str, Any]) -> bool:
@@ -29,6 +30,7 @@ def prepare_navigation_turn(context: Any, user_input: str, *, replace_task: bool
     context.observation = None
     context.depth_rules = None
     clear_target_assessment(context)
+    clear_target_measurement(context)
     if resume:
         plan.status = "finishing" if plan.completed_count == len(plan.subgoals) else "running"
         plan.stop_reason = ""

@@ -12,6 +12,7 @@ from drone_harness.llm.prompts import (
     PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
 )
 from drone_harness.runtime.reflection import discard_stale_target_assessment
+from drone_harness.runtime.target_measurement import target_measurement_snapshot
 
 
 @dataclass
@@ -138,6 +139,7 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
     if changed:
         context.navigation_plan = plan
         discard_stale_target_assessment(context)
+        target_measurement_snapshot(context)
         from drone_harness.logging.task_log import log_navigation_plan
 
         log_navigation_plan(context.profile, context.session_id, "created" if old is None else "updated", plan)
@@ -154,7 +156,8 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
 
 
 def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | None,
-                        *, observation_current: bool) -> list[dict[str, Any]]:
+                        *, observation_current: bool,
+                        latest_target_measurement: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """注入精简的分段导航规则与最新清单，不累积旧快照。"""
     content = "\n".join((NAVIGATION_EXECUTION_PROMPT, LANDMARK_OBSERVATION_PROMPT,
                          SPATIAL_COMPLETION_PROMPT, PROXIMITY_COMPLETION_PROMPT))
@@ -162,6 +165,8 @@ def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | N
         snapshot = plan.snapshot()
         snapshot["observation_current"] = observation_current
         content += "\n当前导航计划：\n" + json.dumps(snapshot, ensure_ascii=False)
+    content += "\n当前目标实测（target为模型选点说明，非程序身份确认；null表示没有当前记录）：\n" + json.dumps(
+        {"latest_target_measurement": latest_target_measurement}, ensure_ascii=False)
     if messages and messages[0]["role"] == "system":
         return [{**messages[0], "content": messages[0]["content"] + "\n" + content}, *messages[1:]]
     return [{"role": "system", "content": content}, *messages]

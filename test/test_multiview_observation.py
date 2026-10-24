@@ -157,7 +157,7 @@ def test_new_single_view_replaces_entire_previous_dual_group(tmp_path):
                                             {'role': 'tool', 'content': 'ok'}]
     compact_navigation_history(compacted, 0, observation_current=True)
     assert len(image_parts(compacted)) == 1
-    measurement = get_tool_definition('measure_distance').handler(context, {'x': .5, 'y': .5})
+    measurement = get_tool_definition('measure_distance').handler(context, {'target': '目标实体表面', 'x': .5, 'y': .5})
     assert not measurement['valid'] and measurement['reason'] == 'FRONT_DEPTH_REQUIRED'
 
 
@@ -255,7 +255,7 @@ def test_malformed_observe_clears_previous_measurement_binding(tmp_path):
     malformed = SimpleNamespace(id='bad', function=SimpleNamespace(name='observe', arguments='{'))
     client = FakeClient([
         SimpleNamespace(content='', tool_calls=[malformed]),
-        SimpleNamespace(content='', tool_calls=[tool_call('measure_distance', {'x': .5, 'y': .5}, 'measure')]),
+        SimpleNamespace(content='', tool_calls=[tool_call('measure_distance', {'target': '目标实体表面', 'x': .5, 'y': .5}, 'measure')]),
         SimpleNamespace(content='需要重新观察', tool_calls=[]),
     ])
     agent_loop(client, 'test', messages, context)
