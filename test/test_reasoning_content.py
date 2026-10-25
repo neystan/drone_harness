@@ -35,6 +35,7 @@ def test_current_glm_tool_reasoning_survives_next_request(tmp_path, monkeypatch,
     messages = [{'role': 'user', 'content': 'go'}]
     with client_factory(context, respond, base_url=OFFICIAL, model='glm-5.3-flash') as client:
         assert loop.agent_loop(client, 'glm-5.3-flash', messages, context) == '完成'
+    assert all(body['reasoning_effort'] == 'high' for body in bodies)
     tool_message = next(m for m in bodies[1]['messages'] if m.get('tool_calls'))
     assert tool_message['reasoning_content'] == REASONING
     assert messages[-1]['reasoning_content'] == REASONING

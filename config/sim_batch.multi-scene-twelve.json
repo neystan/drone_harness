@@ -7,7 +7,7 @@
     24
   ],
   "repeat": 1,
-  "case_timeout_s": 2700,
+  "case_timeout_s": 3000,
   "startup_timeout_s": 120,
   "record": true,
   "preview": true,

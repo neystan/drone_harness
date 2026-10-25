@@ -31,15 +31,17 @@ def test_selection_preserves_order_and_supports_long_ranges():
     assert select_indices("0-350", many, [9]) == list(range(351))
 
 
-def test_case_timeout_defaults_to_45_minutes_and_cannot_exceed_it(tmp_path):
-    """确认默认与显式四十五分钟可用，超过一秒即拒绝。"""
+def test_case_timeout_defaults_to_50_minutes_and_cannot_exceed_it(tmp_path):
+    """确认默认与显式五十分钟可用，旧短时限可用，超过上限即拒绝。"""
     args = SimpleNamespace(config=None, cases=None, repeat=None, scenes=None, cases_file=None)
-    assert batch.read_config(args)["case_timeout_s"] == 2700
+    assert batch.read_config(args)["case_timeout_s"] == 3000
     args.config = tmp_path / "batch.json"
+    write_json(args.config, {"case_timeout_s": 3000})
+    assert batch.read_config(args)["case_timeout_s"] == 3000
     write_json(args.config, {"case_timeout_s": 2700})
     assert batch.read_config(args)["case_timeout_s"] == 2700
-    write_json(args.config, {"case_timeout_s": 2701})
-    with pytest.raises(ValueError, match="45 分钟"):
+    write_json(args.config, {"case_timeout_s": 3001})
+    with pytest.raises(ValueError, match="50 分钟"):
         batch.read_config(args)
     write_json(args.config, {"case_timeout_s": 1200})
     assert batch.read_config(args)["case_timeout_s"] == 1200

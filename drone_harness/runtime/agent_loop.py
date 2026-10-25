@@ -107,7 +107,7 @@ def _run_agent_loop(
                     response = client.chat.completions.create(
                         model=model, messages=request_messages,
                         tools=get_tool_schemas(context.profile, navigation_enabled=navigation_enabled),
-                        tool_choice="auto", temperature=0.0,
+                        tool_choice="auto", temperature=0.0, reasoning_effort="high",
                     )
                 except BaseException as exc:
                     log_model_request(context.profile, context.session_id, model, request_id, "failed", image_count,
