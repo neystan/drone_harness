@@ -77,8 +77,8 @@ def test_sim_loiter_can_resume_but_disarmed_vehicle_cannot(monkeypatch) -> None:
 
 
 def test_down_below_ground_clearance_is_rejected_before_setpoint(monkeypatch) -> None:
-    """下降目标距地不足 0.3 米时沿用原 move 拒绝，不当作降落。"""
-    context = vertical_context()
+    """实机下降保留原有参考面限制，不当作降落。"""
+    context = vertical_context("real")
     controller = context.controller
     controller.vehicle_local_position = SimpleNamespace(x=0.0, y=0.0, z=-1.0, heading=0.0)
     controller.body_to_ned = Mock(return_value=(0.0, 0.0, 0.8))

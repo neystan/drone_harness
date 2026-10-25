@@ -235,6 +235,9 @@ def get_tool_schemas(profile: RuntimeProfile | None = None, *, navigation_enable
     forward_limit = profile.forward_step_limit_m
     if profile.mode == "simulation":
         forward_limit = min(forward_limit, 29.0)
+        functions["down"]["description"] = (
+            "仅在空中垂直下降，不检查下方障碍；允许下降到起飞参考面以下，落地使用 land。"
+        )
     limits = (
         ("takeoff", "height", "本次起飞的相对高度", profile.safety.max_takeoff_height_m),
         ("forward", "distance_m", "本次请求的前进距离", forward_limit),

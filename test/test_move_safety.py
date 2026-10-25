@@ -46,6 +46,50 @@ def test_move_timeout_still_requests_confirmed_hover(tmp_path: Path, monkeypatch
     hover.assert_called_once()
 
 
+@pytest.mark.parametrize("offset", [(0.0, 0.0, 2.0), (0.0, 0.0, -0.5), (0.2, 0.0, 0.0)])
+def test_sim_movement_below_takeoff_reference_reaches_target(tmp_path, monkeypatch, offset) -> None:
+    """仿真下降到参考面以下后仍可升降或平移，不依赖该参考面。"""
+    context = motion_context(tmp_path)
+    controller = context.controller
+    controller.vehicle_local_position.z = 1.0
+    controller.body_to_ned = Mock(return_value=offset)
+    target = [offset[0], offset[1], 1.0 + offset[2]]
+    controller.height_above_ground_m = Mock(side_effect=AssertionError("reference is not terrain"))
+    controller.current_position_ned = Mock(return_value=target)
+    monkeypatch.setattr(flight.time, "sleep", lambda _duration: None)
+
+    if offset[2] > 0:
+        result = flight.down(context, offset[2])
+    elif offset[2] < 0:
+        result = flight.up(context, -offset[2])
+    else:
+        result = flight.move(context, *offset, completion_tolerance_m=0.05)
+
+    assert result["success"]
+    assert result["final_position_ned"] == target
+    controller.start_position_hold.assert_called_once_with(target)
+    controller.height_above_ground_m.assert_not_called()
+
+
+def test_sim_down_below_reference_timeout_keeps_existing_stop(tmp_path, monkeypatch) -> None:
+    """低于参考面的下降仍在动作超时后确认悬停，不重试或恢复导航。"""
+    context = motion_context(tmp_path)
+    controller = context.controller
+    controller.body_to_ned = Mock(return_value=(0.0, 0.0, 2.0))
+    controller.height_above_ground_m = Mock(return_value=-1.0)
+    monkeypatch.setattr(flight, "_wait_for_valid_position", lambda _controller: True)
+    monkeypatch.setattr(flight.time, "time", Mock(side_effect=[0.0, 100.0]))
+    hover = Mock(return_value={"safety_state": "HOLD_CONFIRMED"})
+    monkeypatch.setattr(flight, "request_confirmed_hover", hover)
+
+    result = flight.down(context, 2.0)
+
+    assert result["error"] == "MOVE_TIMEOUT"
+    assert result["safety_state"] == "HOLD_CONFIRMED"
+    controller.start_position_hold.assert_called_once_with([0.0, 0.0, 1.0])
+    hover.assert_called_once()
+
+
 def test_unconfirmed_hover_still_escalates_to_offboard_handoff(tmp_path: Path, monkeypatch) -> None:
     """超时且 PX4 未确认悬停时仍抛出原安全交接异常。"""
     context = motion_context(tmp_path)

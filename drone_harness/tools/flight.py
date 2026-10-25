@@ -792,7 +792,7 @@ def up(context: Any, distance_m: Any) -> dict[str, Any]:
 
 
 def down(context: Any, distance_m: Any) -> dict[str, Any]:
-    """在空中下降，近地目标继续由原 move 拒绝。"""
+    """在空中下降，仿真允许低于起飞参考面。"""
     return _vertical_move(context, distance_m, upward=False)
 
 
@@ -870,23 +870,24 @@ def move(
         current_position.z + dz_ned,
     ]
 
-    target_height = controller.height_above_ground_m(target_position[2])
-    if target_height is None:
-        return {
-            "success": False,
-            "error": "GROUND_REFERENCE_UNAVAILABLE",
-            "message": "ground altitude reference is unavailable",
-            "target_position_ned": target_position,
-        }
+    if getattr(profile, "mode", None) != "simulation":
+        target_height = controller.height_above_ground_m(target_position[2])
+        if target_height is None:
+            return {
+                "success": False,
+                "error": "GROUND_REFERENCE_UNAVAILABLE",
+                "message": "ground altitude reference is unavailable",
+                "target_position_ned": target_position,
+            }
 
-    if target_height < 0.3:
-        return {
-            "success": False,
-            "error": "TARGET_Z_TOO_LOW",
-            "message": "target altitude is too close to the ground",
-            "target_height_m": target_height,
-            "target_position_ned": target_position,
-        }
+        if target_height < 0.3:
+            return {
+                "success": False,
+                "error": "TARGET_Z_TOO_LOW",
+                "message": "target altitude is too close to the ground",
+                "target_height_m": target_height,
+                "target_position_ned": target_position,
+            }
 
     if controller.start_position_hold(target_position) is False:
         return _handle_position_hold_start_failure(controller, "move", airborne=True)
