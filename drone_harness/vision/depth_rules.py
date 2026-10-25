@@ -28,10 +28,19 @@ class DepthRules:
     depth_max_m: float = 20.0
 
     def as_text(self) -> str:
-        """统一输出三个方向的障碍距离，不把量程边界当作障碍。"""
+        """区分通道约束与目标测距，保留三个方向的障碍距离。"""
+        measurement_note = (
+            "\n\n【参照物测距说明】\n本次observe未执行参照物选点测距。\n"
+            "不能将上述障碍距离或前进上限作为参照物距离；"
+            "参照物距离以measure_distance的有效结果为准。"
+        )
         if not self.depth_valid:
             reason = f"原因：{self.reason}。" if self.reason else ""
-            return f"深度无效，前方与左右距离未知；本次观测的前进上限：0.00 米。{reason}"
+            return (
+                "【前进通道约束】\n"
+                f"深度无效，前方与左右距离未知；本次观测的前进上限：0.00 米。{reason}"
+                + measurement_note
+            )
         def describe(label: str, status: str, distance: float | None) -> str:
             """区分实测障碍、范围内未检出与未知。"""
             if distance is not None:
@@ -41,11 +50,14 @@ class DepthRules:
             return f"{label}障碍距离：未知。"
 
         return (
-            "深度有效。障碍距离均为沿当前朝向、距机体前缘的距离；左右数值不是转向后的可飞距离。\n"
+            "【前进通道约束】\n"
+            "深度有效。以下障碍距离沿当前朝向、从机体前缘计算，未与具体参照物关联。\n"
             f"{describe('前方', 'clear', self.front_obstacle_m)}\n"
             f"{describe('左前', self.left_front, self.left_front_obstacle_m)}\n"
             f"{describe('右前', self.right_front, self.right_front_obstacle_m)}\n"
-            f"本次观测的前进上限：{self.forward_max_m:.2f} 米。"
+            f"本次观测的前进上限：{self.forward_max_m:.2f} 米。\n"
+            "左右数值不是转向后的可飞距离。"
+            + measurement_note
         )
 
 
