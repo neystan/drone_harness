@@ -59,7 +59,7 @@ def test_navigation_prompt_checks_original_goal_before_finishing(tmp_path):
         [{"role": "system", "content": build_system_prompt(context_for(tmp_path).profile)}],
         None, observation_current=False)[0]["content"]
     for phrase in ("以最新观察和实际移动核实当前项", "依据不足保持未完成", "再推进下一项",
-                   "不删除要求或放宽完成条件", "目标边界时缩短步长",
+                   "必要动作不能改成可选动作", "目标边界时缩短步长",
                    "原始指令的最终位置与剩余要求", "全部导航目标确认后直接收尾",
                    "要求降落则调用 land，否则只输出最终完成说明",
                    "降落不写入条目或完成条件", "land 成功立即结束本轮"):

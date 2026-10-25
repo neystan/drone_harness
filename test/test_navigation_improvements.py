@@ -36,7 +36,7 @@ def test_prompt_injects_short_navigation_and_relation_rules(tmp_path):
                  "核对机下位置是否落入目标范围", "目标前后位置变化", "入口到出口的移动与边界变化",
                  "凡以接近作为子目标完成依据", "当前前视图实体表面内部选点",
                  "valid=true", "distance_m≤20米", "最终降落或悬停前",
-                 "常规前进无需测距", "区分超范围和未知", "不逐句或按工具机械拆分"):
+                 "常规前进无需测距", "区分超范围和未知", "不按工具机械拆分"):
         assert rule in prompt
     assert "先向左、向右旋转" not in prompt
     assert "skill" not in prompt and "target_status" not in prompt
