@@ -33,7 +33,7 @@ def test_system_prompt_focuses_on_navigation_not_tool_implementation(tmp_path):
     for removed in ("单目标", "候选完成", "观测号", "同号", "第二个视觉模型", "19 米", "1000", "不重复索取"):
         assert removed not in prompt
     assert "障碍" in prompt and "不默认视野外的上方或下方安全" in prompt
-    assert "observe 的深度摘要只提供障碍净空和前进上限，不代表目标距离" in prompt
+    assert "未与指定参照物关联" in prompt
     for navigation_only in ("update_navigation_plan", "参照物：", "位置核验：", "接近核验："):
         assert navigation_only not in prompt
 
@@ -73,7 +73,7 @@ def test_visual_memory_keeps_detail_and_focuses_on_changes(tmp_path):
     prompt = build_system_prompt(context_for(tmp_path).profile)
     for phrase in ("充分描述", "目标特征", "道路与区域边界", "新增信息与变化", "位置关系", "视觉记忆",
                    "区分可见事实与不确定判断",
-                   "observe 的深度摘要只提供障碍净空和前进上限，不代表目标距离", "再决定后续飞行动作"):
+                   "未与指定参照物关联", "再决定后续飞行动作"):
         assert phrase in prompt
     assert "一两句话" not in prompt
 
