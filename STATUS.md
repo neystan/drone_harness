@@ -1,6 +1,6 @@
 # 当前状态与待办
 
-最后更新：2026-10-25（Asia/Shanghai）。
+最后更新：2026-10-29（Asia/Shanghai）。
 
 项目架构、已完成能力和验证证据见[REVIEW.md](REVIEW.md)；固定协作与文档维护规则见[AGENTS.md](/home/stan/AirVLN/AGENTS.md)。
 
@@ -15,6 +15,28 @@
 
 - 效率回退定位已完成：两例新增时间集中在模型请求内，观察后平均输出tokens增至旧轮2.41/4.97倍。定位时请求未显式设置思考强度/输出预算，清单迟更使推理累积；未发现重复拼接推理，转向清零的物理进展保护也不覆盖导航停滞。随后已将reasoning_effort显式改为high，保留推理回传；完整离线552项通过（24.49秒）。[定位报告与逐请求证据](../drone_harness_runtime/analysis/20261024-navigation-efficiency-audit/summary.md)
 - high十一例批次`20261024-230333-444621`已结算并复盘，冻结e0f7913、tracked diff为空：SR=1/11、OSR=5/11；485评分成功，7例降落、1例悬停完成、1例超时、2例下降超时停止。895次模型请求成功，另1次为到时取消，无独立接口失败；486/487请求均值降至9.31/8.14秒，但终点仍偏离。起飞参考面下限、分段语义放宽及障碍距离与目标距离混用是本轮四项通用优化的依据。[完整复盘与关键帧](../drone_harness_runtime/analysis/20261025-high-eleven-review/summary.md)
+
+## 本轮待办：观察历史与工具反馈（2026-10-29）
+
+- [ ] **1. 清理过期观察消息。** 在`_compact_history()`中将被新观察替代的旧图组及其整份自动文字改为简短失效说明；取图失败时同样清理旧图与旧摘要。最新观察保持完整，系统与四段导航提示模板不删；用户原始指令、助手视觉记忆、推理和工具协议不由这项操作清理。该项不处理助手自己写下的旧距离或错误判断。
+- [ ] **2. 精简模型可见的工具反馈。** 在工具消息构造处按工具名称筛选成功返回，内部结果、质量检查与原始日志保留完整；所有原有message文案保留，失败返回保留当前模型可见内容。测距必须保留valid，target与选点继续由既有当前测距摘要提供；不增加请求或更改完成判断。
+
+第二项成功返回的字段约定如下，字段仅在原结果存在时提供：
+
+| 工具 | 模型可见字段 |
+| --- | --- |
+| measure_distance | success、valid、distance_m、reason、message |
+| observe | success、view、depth_valid、forward_max_m、message；深度无效时保留depth_reason |
+| forward | success、motion_executed、requested_distance_m、commanded_distance_m、实际移动时final_position_ned、message；异常时保留depth_reason |
+| takeoff | success、target_height、final_position_ned、message |
+| up/down | success、body_offset_frd、final_position_ned、message |
+| rotate | success、direction、degrees、target_yaw_rad、原分支已有final_position_ned、message |
+| land | success、final_position_ned、message |
+| get_state、update_navigation_plan、activate_skill | 保持当前返回 |
+
+成功运动后保留observation_current=false，去掉重复observation_note；失败保留错误码、参数限额、已有最终位置及确认的安全状态，不把超时或中断写成未移动。两项分别自行做必要验收；提交安排为本待办一提交、每项实现各一提交，共三个本地提交。
+
+共同边界：沿用high、推理回传、20米标准和当前工具执行逻辑；396继续暂缓。本轮验证上下文与反馈变化，不据离线检查声明导航成功率或模型耗时改善。
 
 ## 已完成总览
 
@@ -99,20 +121,5 @@
 本轮按原十一例顺序排除369，执行`229,328,29,412,444,485,486,487,362,396`共10例，各一次、每例3000秒；high、推理回传、中文及20FPS预览/录像保留。通用配置仍保留十一例，本次用`--cases`覆盖。资产dry-run及ROS域42三节点通信/退出预检通过。运行状态、批次及首例正常运行确认统一见[启动记录](/home/stan/AirVLN/drone_harness_runtime/launches/20261025-163053-navigation-ten-cases/launch.json)，无需凭文档推断是否已启动。
 
 ## 其他暂缓事项
-
-工具返回精简已确认但尚未实施，不混入本轮四项。所有现有message字段及文案保留，内部质量检查不减；模型可见字段约定如下，条件字段仍按实际分支出现：
-
-| 工具 | 拟保留字段 |
-| --- | --- |
-| measure_distance | success、distance_m、reason、message |
-| observe | success、view、depth_valid、forward_max_m、异常时depth_reason、message |
-| forward | success、motion_executed、requested_distance_m、commanded_distance_m、实际移动时final_position_ned、异常时depth_reason、message |
-| takeoff | success、target_height、final_position_ned、message |
-| up/down | success、body_offset_frd、final_position_ned、message |
-| rotate | success、direction、degrees、target_yaw_rad、原分支已有final_position_ned、message |
-| land | success、final_position_ned、message |
-| get_state、update_navigation_plan | 保持现状 |
-
-成功运动后保留observation_current=false，去掉重复observation_note；失败保留错误码、原message、参数限额、已有最终位置及确认的安全状态。未测出距离仍保留未知，不把超时或中断写成未移动。
 
 地图、检测/分割模型、自动追踪、持久化恢复、水平/高度分解、额外图像归档和实机自主飞行不在当前范围。
