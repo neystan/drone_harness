@@ -171,7 +171,9 @@ def test_successful_motion_does_not_automatically_observe(tmp_path: Path, monkey
     assert context.task_state.observation_id is None
     assert len(client.requests) == 2
     assert all(not isinstance(item["content"], list) for item in client.requests[1])
-    assert "历史参考" in json.loads(client.requests[1][-1]["content"])["observation_note"]
+    feedback = json.loads(client.requests[1][-1]["content"])
+    assert feedback["observation_current"] is False
+    assert "observation_note" not in feedback
 
 
 def test_motion_then_explicit_observe_sends_new_frame_to_same_model(tmp_path: Path, monkeypatch) -> None:

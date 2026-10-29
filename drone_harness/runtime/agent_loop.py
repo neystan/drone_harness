@@ -40,6 +40,18 @@ MAX_NAVIGATION_REQUESTS = 200
 MAX_CONSECUTIVE_NO_PROGRESS = 3
 MAX_CORRECTIONS = 2
 
+MODEL_TOOL_RESULT_FIELDS = {
+    "measure_distance": {"success", "valid", "distance_m", "reason", "message"},
+    "observe": {"success", "view", "depth_valid", "forward_max_m", "message"},
+    "forward": {"success", "motion_executed", "requested_distance_m", "commanded_distance_m",
+                "final_position_ned", "message"},
+    "takeoff": {"success", "target_height", "final_position_ned", "message"},
+    "up": {"success", "body_offset_frd", "final_position_ned", "message"},
+    "down": {"success", "body_offset_frd", "final_position_ned", "message"},
+    "rotate": {"success", "direction", "degrees", "target_yaw_rad", "final_position_ned", "message"},
+    "land": {"success", "final_position_ned", "message"},
+}
+
 
 def agent_loop(
     client: Any,
@@ -205,7 +217,7 @@ def _run_agent_loop(
                 time.sleep(wait_s)
             tool_result["observation_current"] = False
             tool_result["observation_note"] = "动作前的图像仅供历史参考；请调用 observe 重新观察后再规划。"
-        messages.append(_build_tool_message(call.id, tool_result))
+        messages.append(_build_tool_message(call.id, tool_result, call.function.name))
         if call.function.name == "update_navigation_plan":
             if not tool_result.get("success"):
                 if navigation_enabled and tool_result.get("error") in {
@@ -306,7 +318,7 @@ def _skip_navigation_calls(
 ) -> None:
     """记录未执行工具并补齐协议，压缩后仍可从日志核查。"""
     for call in calls:
-        messages.append(_build_tool_message(call.id, result))
+        messages.append(_build_tool_message(call.id, result, call.function.name))
         log_tool_call(context.profile, context.session_id, call.function.name,
                       {"raw_arguments": call.function.arguments}, result)
 
@@ -451,7 +463,8 @@ def _append_turn_end_tool_results(
         "error": "TURN_ABORTED",
         "message": str(exc),
     }
-    messages.append(_build_tool_message(tool_calls[stopped_index].id, result))
+    stopped_call = tool_calls[stopped_index]
+    messages.append(_build_tool_message(stopped_call.id, result, stopped_call.function.name))
 
     skipped_result = {
         "success": False,
@@ -459,13 +472,20 @@ def _append_turn_end_tool_results(
         "message": str(exc),
     }
     for pending_call in tool_calls[stopped_index + 1 :]:
-        messages.append(_build_tool_message(pending_call.id, skipped_result))
+        messages.append(_build_tool_message(pending_call.id, skipped_result, pending_call.function.name))
 
 
-def _build_tool_message(tool_call_id: str, result: dict[str, Any]) -> dict[str, Any]:
-    """保留工具配对与执行反馈，仅在模型视图隐藏观测编号和时间。"""
+def _build_tool_message(tool_call_id: str, result: dict[str, Any], tool_name: str) -> dict[str, Any]:
+    """按工具精简成功反馈，失败保留完整模型视图，不修改原始结果。"""
     model_result = {key: value for key, value in result.items()
                     if key not in {"observation_id", "rgb_stamp_ns", "depth_stamp_ns", "compact_history"}}
+    if result.get("success") is True and not result.get("error") and tool_name in MODEL_TOOL_RESULT_FIELDS:
+        fields = MODEL_TOOL_RESULT_FIELDS[tool_name] | {"observation_current"}
+        if result.get("depth_reason") or result.get("depth_valid") is False:
+            fields = fields | {"depth_reason"}
+        if tool_name == "forward" and result.get("motion_executed") is False:
+            fields = fields - {"final_position_ned"}
+        model_result = {key: value for key, value in model_result.items() if key in fields}
     return {
         "role": "tool",
         "tool_call_id": tool_call_id,

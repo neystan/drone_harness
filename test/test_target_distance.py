@@ -160,7 +160,11 @@ def test_measurement_reaches_next_vlm_and_motion_invalidates_source(tmp_path, mo
     feedback = json.loads(client.requests[2][-1]['content'])
     assert feedback['reason'] == reason
     assert feedback['distance_m'] == (pytest.approx(distance) if reason == 'OK' else None)
-    assert feedback['max_range_m'] == 30
+    assert 'max_range_m' not in feedback and feedback['valid'] is (reason == 'OK')
+    raw_events = [json.loads(line) for line in
+                  (tmp_path / 'logs/session_test/tool_calls.jsonl').read_text().splitlines()]
+    measured = next(event['result'] for event in raw_events if event['tool_name'] == 'measure_distance')
+    assert measured['max_range_m'] == 30 and measured['reason'] == feedback['reason']
     if reason == 'OUT_OF_RANGE':
         assert '30 米测距上限' in feedback['message']
     assert json.loads(client.requests[4][-1]['content'])['reason'] == 'OBSERVATION_REQUIRED'

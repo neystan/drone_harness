@@ -155,16 +155,16 @@ def test_invalid_depth_is_unknown_not_clear_and_side_range_is_configurable():
 
 
 def test_tool_message_hides_metadata_without_mutating_logged_result():
-    """模型不接收观测元数据，但结果与原生 tool_call_id 完整保留。"""
+    """成功前进只展示执行依据，原始诊断和工具配对不受筛选影响。"""
     result = {"success": True, "observation_id": "rgb-private", "rgb_stamp_ns": 123,
               "depth_stamp_ns": 124, "forward_max_m": .5,
               "requested_distance_m": 3, "commanded_distance_m": .5, "clamped": True}
     before = deepcopy(result)
-    message = _build_tool_message("native-call-id", result)
+    message = _build_tool_message("native-call-id", result, "forward")
     visible = json.loads(message["content"])
     assert message["tool_call_id"] == "native-call-id"
     assert not ({"observation_id", "rgb_stamp_ns", "depth_stamp_ns"} & visible.keys())
-    assert visible["forward_max_m"] == .5 and visible["clamped"]
+    assert visible == {"success": True, "requested_distance_m": 3, "commanded_distance_m": .5}
     assert result == before
 
 

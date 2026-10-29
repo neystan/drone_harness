@@ -195,5 +195,13 @@ def test_actual_loop_exposes_only_current_measurement_without_extra_requests(tmp
     assert measurement_in(client.requests[3]) is None
     assert measurement_in(client.requests[4])["reason"] == "OBSERVATION_REQUIRED"
     assert not measurement_in(client.requests[4])["valid"]
+    feedback = json.loads(client.requests[1][-1]["content"])
+    assert set(feedback) == {"success", "valid", "distance_m", "reason", "message"}
+    assert feedback["valid"] and feedback["distance_m"] == first["distance_m"]
+    raw_events = [json.loads(line) for line in
+                  (tmp_path / "logs/session_test/tool_calls.jsonl").read_text().splitlines()]
+    raw = next(event["result"] for event in raw_events if event["tool_name"] == "measure_distance")
+    assert raw["target"] == first["target"] and raw["sample_count"] == raw["valid_count"] == 25
+    assert raw["pixel"] == {"x": 8, "y": 6}
     assert all(request[0]["content"].count('"latest_target_measurement"') == 1
                for request in client.requests)
