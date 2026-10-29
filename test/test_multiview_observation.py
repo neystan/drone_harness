@@ -151,6 +151,14 @@ def test_new_single_view_replaces_entire_previous_dual_group(tmp_path):
     messages = [{'role': 'user', 'content': '检查位置'}]
     agent_loop(client, 'same-vlm', messages, context)
     assert [len(image_parts(request)) for request in client.requests] == [0, 2, 1, 1]
+    first_observation = client.requests[1][-1]
+    assert '前进上限' in first_observation['content'][0]['text']
+    previous_observations = [item for item in client.requests[-1]
+                             if isinstance(item.get('content'), list) and not image_parts([item])]
+    assert len(previous_observations) == 2
+    assert all('前进上限' not in str(item) and '摄像头' not in str(item)
+               for item in previous_observations)
+    assert '前进上限' in first_observation['content'][0]['text']
     latest = next(item for item in reversed(messages) if image_parts([item]))
     assert '【下方摄像头】' in latest['content'][0]['text']
     compacted = messages + [{'role': 'assistant', 'content': 'plan'},
@@ -260,5 +268,8 @@ def test_malformed_observe_clears_previous_measurement_binding(tmp_path):
     ])
     agent_loop(client, 'test', messages, context)
     assert not image_parts(client.requests[1])
+    stale = next(item for item in client.requests[1] if isinstance(item.get('content'), list))
+    assert '前进上限' in client.requests[0][-1]['content'][0]['text']
+    assert '前进上限' not in str(stale) and '摄像头' not in str(stale)
     assert json.loads(client.requests[2][-1]['content'])['reason'] == 'OBSERVATION_REQUIRED'
     assert context.observation is None and context.depth_rules is None

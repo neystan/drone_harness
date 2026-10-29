@@ -350,15 +350,15 @@ def append_observation(
 
 
 def _compact_history(messages: list[dict[str, Any]], *, keep_latest: bool = True) -> None:
-    """保留最新观察图组，取图失败时移除全部历史图片。"""
+    """保留最新观察，旧图与自动文字一并失效，取图失败时清理全部观察。"""
     image_messages = [index for index, message in enumerate(messages)
                       if isinstance(message.get("content"), list)
                       and any(part.get("type") == "image_url" for part in message["content"])]
     for index in (image_messages[:-1] if keep_latest else image_messages):
         message = messages[index]
-        content = [{"type": "text", "text": "历史观测（图片已移除）："}]
-        content.extend(part for part in message["content"] if part.get("type") != "image_url")
-        messages[index] = {**message, "content": content}
+        messages[index] = {**message, "content": [{
+            "type": "text", "text": "历史观察已失效，图片和自动深度信息已移除。",
+        }]}
 
 
 def _current_pose(context: ToolContext) -> tuple[float, float, float] | None:

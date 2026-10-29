@@ -69,12 +69,13 @@ def test_runtime_keeps_stop_message_without_orphan_tool_calls(tmp_path, monkeypa
     assert all(set(item) == {"role", "content"} for item in followup)
 
 
-def test_history_removes_only_old_images_without_mutating_prior_requests():
-    """旧图片被替换为历史标记，所有文字、工具调用及结果按原序保留。"""
+def test_history_removes_old_observation_text_without_mutating_prior_requests():
+    """新观察替换旧图和深度，助手记忆、推理、工具协议与既有请求不变。"""
     messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "目标"}]
     for index in range(5):
         messages.extend([
-            {"role": "assistant", "content": f"描述 {index}", "tool_calls": [{"id": str(index)}]},
+            {"role": "assistant", "content": f"描述 {index}", "reasoning_content": f"推理 {index}",
+             "tool_calls": [{"id": str(index)}]},
             {"role": "tool", "tool_call_id": str(index), "content": f"结果 {index}"},
             {"role": "user", "content": [{"type": "text", "text": f"深度摘要 {index}"},
                                             {"type": "image_url", "image_url": {"url": f"image-{index}"}}]},
@@ -90,4 +91,8 @@ def test_history_removes_only_old_images_without_mutating_prior_requests():
     assert "image-0" in str(previous_request)
     for index in range(5):
         assert f"描述 {index}" in str(messages) and f"结果 {index}" in str(messages)
-        assert f"深度摘要 {index}" in str(messages)
+        assert f"推理 {index}" in str(messages)
+        assert (f"深度摘要 {index}" in str(messages)) is (index == 4)
+        assert f"深度摘要 {index}" in str(previous_request)
+    assert messages[:2] == previous_request[:2]
+    assert messages[-1] is previous_request[-1]
