@@ -254,6 +254,8 @@ def _run_interactive_loop(
             context.navigation_resumable = False
             context.target_assessment = None
             context.target_assessment_goal = None
+            context.previous_target_assessment = None
+            context.previous_target_assessment_goal = None
             clear_target_measurement(context)
             # 明确取消或替换时隔离旧任务对话，避免模型从旧文字自行恢复。
             conversation.clear()

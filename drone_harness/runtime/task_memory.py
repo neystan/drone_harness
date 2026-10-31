@@ -29,7 +29,7 @@ def prepare_navigation_turn(context: Any, user_input: str, *, replace_task: bool
               and plan is not None and plan.status in {"running", "finishing", "incomplete"})
     context.observation = None
     context.depth_rules = None
-    clear_target_assessment(context)
+    clear_target_assessment(context, keep_history=bool(resume))
     clear_target_measurement(context)
     if resume:
         plan.status = "finishing" if plan.completed_count == len(plan.subgoals) else "running"

@@ -34,7 +34,9 @@ def measured_context(tmp_path, distance=18.6):
 
 def measurement_in(request):
     """读取实际模型请求中单份当前测距摘要。"""
-    return json.loads(request[0]["content"].splitlines()[-1])["latest_target_measurement"]
+    line = next(line for line in request[0]["content"].splitlines()
+                if line.startswith('{"latest_target_measurement":'))
+    return json.loads(line)["latest_target_measurement"]
 
 
 def test_target_schema_and_actual_measurement_binding(tmp_path):

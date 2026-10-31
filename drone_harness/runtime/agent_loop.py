@@ -25,7 +25,7 @@ from drone_harness.runtime.observation import ObservationSnapshot, build_observa
 from drone_harness.runtime.safety import EndCurrentTurn, SafetyHandoffRequired, request_confirmed_hover
 from drone_harness.runtime.skill_search import SEARCH_MARKER, build_search_message, clear_search_images
 from drone_harness.runtime.reflection import (
-    clear_target_assessment, discard_stale_target_assessment, record_target_assessment,
+    clear_target_assessment, discard_stale_target_assessment, record_target_assessment, target_assessment_snapshot,
 )
 from drone_harness.runtime.task_state import format_task_state_line
 from drone_harness.runtime.task_memory import is_recoverable_rejection
@@ -95,15 +95,17 @@ def _run_agent_loop(
                 return _stop_with_message(context, interruption["message"], safety_stop=True)
         _record_task_state(context, "thinking")
         requests += 1
-        has_current_image = _navigation_observation_current(context) or any(
+        has_search_image = any(
             isinstance(item.get("content"), list)
             and any(part.get("type") == "image_url" for part in item["content"])
             and item["content"][0].get("text", "").startswith(SEARCH_MARKER)
             for item in messages)
+        has_current_image = _navigation_observation_current(context) or has_search_image
         try:
             request_messages = (navigation_messages(
                 messages, plan, observation_current=_navigation_observation_current(context),
-                latest_target_measurement=target_measurement_snapshot(context))
+                latest_target_measurement=target_measurement_snapshot(context),
+                target_assessment=target_assessment_snapshot(context))
                                 if navigation_enabled else messages)
             request_messages = prepare_model_messages(request_messages, context.profile.llm, model)
             reasoning_details = reasoning_request_details(messages, request_messages)
@@ -151,7 +153,9 @@ def _run_agent_loop(
         assistant_text = message.content or ""
         if not isinstance(assistant_text, str):
             return _stop_with_message(context, "模型文本响应结构无效，已停止本轮。", safety_stop=True)
-        record_target_assessment(context, assistant_text, has_current_image=has_current_image)
+        record_target_assessment(context, assistant_text, has_current_image=has_current_image,
+                                 source={"type": "four_direction_search", "request_id": request_id}
+                                 if has_search_image else None)
         display_text = assistant_text
         messages.append(build_assistant_message(message, tool_calls))
         if display_text:

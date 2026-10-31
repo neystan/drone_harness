@@ -157,7 +157,8 @@ def update_navigation_plan(context: Any, arguments: dict[str, Any]) -> dict[str,
 
 def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | None,
                         *, observation_current: bool,
-                        latest_target_measurement: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+                        latest_target_measurement: dict[str, Any] | None = None,
+                        target_assessment: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """注入精简的分段导航规则与最新清单，不累积旧快照。"""
     content = "\n".join((NAVIGATION_EXECUTION_PROMPT, LANDMARK_OBSERVATION_PROMPT,
                          SPATIAL_COMPLETION_PROMPT, PROXIMITY_COMPLETION_PROMPT))
@@ -167,6 +168,8 @@ def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | N
         content += "\n当前导航计划：\n" + json.dumps(snapshot, ensure_ascii=False)
     content += "\n当前目标实测（target为模型选点说明，非程序身份确认；null表示没有当前记录）：\n" + json.dumps(
         {"latest_target_measurement": latest_target_measurement}, ensure_ascii=False)
+    content += "\n参照物记录（均为模型判断；current对应当前图，previous仅供历史对照，旧确认不继承）：\n" + json.dumps(
+        target_assessment or {"current": None, "previous": None}, ensure_ascii=False)
     if messages and messages[0]["role"] == "system":
         return [{**messages[0], "content": messages[0]["content"] + "\n" + content}, *messages[1:]]
     return [{"role": "system", "content": content}, *messages]

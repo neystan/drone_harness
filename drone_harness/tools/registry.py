@@ -50,8 +50,10 @@ class ToolContext:
     navigation_instruction: str = ""
     navigation_resumable: bool = True
     search_observations: list[ObservationSnapshot] | None = None
-    target_assessment: dict[str, str] | None = None
+    target_assessment: dict[str, Any] | None = None
     target_assessment_goal: tuple[str, ...] | None = None
+    previous_target_assessment: dict[str, Any] | None = None
+    previous_target_assessment_goal: tuple[str, ...] | None = None
     latest_target_measurement: dict[str, Any] | None = None
     target_measurement_goal: tuple[str, ...] | None = None
     target_measurement_observation_id: str | None = None
