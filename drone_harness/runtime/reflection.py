@@ -34,6 +34,10 @@ def discard_stale_target_assessment(context: Any) -> None:
     if context.previous_target_assessment_goal != key:
         context.previous_target_assessment = None
         context.previous_target_assessment_goal = None
+    if context.navigation_plan is None or not context.navigation_plan.terminal_stage:
+        for record in (context.target_assessment, context.previous_target_assessment):
+            if record is not None:
+                record.pop("arrival", None)
 
 
 def target_assessment_snapshot(context: Any) -> dict[str, Any]:
@@ -64,14 +68,27 @@ def record_target_assessment(context: Any, text: str, *, has_current_image: bool
     except (json.JSONDecodeError, ValueError):
         return
     fields = ("target_status", "candidate", "support", "conflict", "open_issue")
-    if (not isinstance(value, dict) or set(value) != set(fields)
+    terminal = context.navigation_plan is not None and context.navigation_plan.terminal_stage
+    allowed = set(fields) | ({"arrival"} if terminal else set())
+    if (not isinstance(value, dict) or not set(fields).issubset(value) or set(value) - allowed
             or not isinstance(value["target_status"], str)
             or value["target_status"] not in {"confirmed", "uncertain", "not_found"}
             or any(not isinstance(value[key], str) for key in fields)
             or (value["target_status"] != "not_found" and not value["candidate"].strip())
             or not any(value[key].strip() for key in ("support", "conflict", "open_issue"))):
         return
+    previous = context.previous_target_assessment
+    if previous is not None and previous["candidate"] != value["candidate"].strip():
+        from drone_harness.runtime.target_measurement import clear_target_measurement
+
+        clear_target_measurement(context)
     context.target_assessment = {key: value[key].strip() for key in fields}
+    arrival = value.get("arrival")
+    if (terminal and isinstance(arrival, dict) and set(arrival) == {"position_status", "evidence"}
+            and isinstance(arrival["position_status"], str)
+            and arrival["position_status"] in {"met", "unmet", "unknown"}
+            and isinstance(arrival["evidence"], str) and arrival["evidence"].strip()):
+        context.target_assessment["arrival"] = {key: val.strip() for key, val in arrival.items()}
     context.target_assessment["source"] = deepcopy(source) if source is not None else {
         "type": "observation", "observation_id": getattr(context.observation, "observation_id", None),
     }

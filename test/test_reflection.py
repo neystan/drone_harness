@@ -226,7 +226,8 @@ def test_navigation_request_uses_single_live_record_and_stale_history_after_moti
     context.navigation_enabled = True
     context.navigation_instruction = "寻找仓库旁卡车"
     context.navigation_plan = parse_navigation_plan({"subgoals": [{"id": "a", "description": "找卡车",
-        "completion_condition": "到卡车旁", "status": "in_progress"}], "reason": "建立"}, "寻找仓库旁卡车")
+        "completion_condition": "到卡车旁", "status": "in_progress"}, {"id": "b", "description": "到路口",
+        "completion_condition": "位于路口", "status": "pending"}], "reason": "建立"}, "寻找仓库旁卡车再到路口")
     messages = [{"role": "user", "content": "寻找仓库旁卡车"}]
     append_observation(context, messages, snapshot_at())
     monkeypatch.setattr(flight, "rotate", Mock(return_value={"success": True, "degrees": 10}))

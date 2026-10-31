@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -10,6 +11,7 @@ from drone_harness.llm.messages import assistant_history_message
 from drone_harness.llm.prompts import (
     LANDMARK_OBSERVATION_PROMPT, NAVIGATION_EXECUTION_PROMPT,
     PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
+    TERMINAL_COMPLETION_PROMPT,
 )
 from drone_harness.runtime.reflection import discard_stale_target_assessment
 from drone_harness.runtime.target_measurement import target_measurement_snapshot
@@ -50,6 +52,12 @@ class NavigationPlan:
         return next((goal for goal in self.subgoals if goal.status == "in_progress"),
                     next((goal for goal in self.subgoals if goal.status == "pending"), None))
 
+    @property
+    def terminal_stage(self) -> bool:
+        """仅前项均已完成且最后一项仍为当前项时进入终点阶段。"""
+        return (self.current is not None and self.current is self.subgoals[-1]
+                and all(goal.status == "completed" for goal in self.subgoals[:-1]))
+
     def finish(self, *, completed: bool, reason: str) -> None:
         """全部模型标记完成且收尾成功，才记录整体完成。"""
         self.status = "completed" if completed and self.completed_count == len(self.subgoals) else "incomplete"
@@ -67,6 +75,7 @@ class NavigationPlan:
             "total_count": len(self.subgoals),
             "current_subgoal_id": current.id if current else None,
             "current_is_explicit": current is not None and current.status == "in_progress",
+            "terminal_stage": self.terminal_stage,
             "stop_reason": self.stop_reason,
             "feedback": self.feedback,
         }
@@ -166,10 +175,21 @@ def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | N
         snapshot = plan.snapshot()
         snapshot["observation_current"] = observation_current
         content += "\n当前导航计划：\n" + json.dumps(snapshot, ensure_ascii=False)
-    content += "\n当前目标实测（target为模型选点说明，非程序身份确认；null表示没有当前记录）：\n" + json.dumps(
-        {"latest_target_measurement": latest_target_measurement}, ensure_ascii=False)
-    content += "\n参照物记录（均为模型判断；current对应当前图，previous仅供历史对照，旧确认不继承）：\n" + json.dumps(
-        target_assessment or {"current": None, "previous": None}, ensure_ascii=False)
+    assessment = deepcopy(target_assessment or {"current": None, "previous": None})
+    if plan is not None and plan.terminal_stage:
+        content += "\n" + TERMINAL_COMPLETION_PROMPT
+        arrival = assessment["current"].pop("arrival", None) if assessment["current"] else None
+        content += "\n当前终点依据（身份与位置为模型判断，距离来自工具；previous仅供历史对照；null为未知）：\n" + json.dumps({
+            "latest_target_measurement": latest_target_measurement,
+            "target_assessment": assessment,
+            "position_requirement": plan.current.completion_condition,
+            "arrival": arrival,
+        }, ensure_ascii=False)
+    else:
+        content += "\n当前目标实测（target为模型选点说明，非程序身份确认；null表示没有当前记录）：\n" + json.dumps(
+            {"latest_target_measurement": latest_target_measurement}, ensure_ascii=False)
+        content += "\n参照物记录（均为模型判断；current对应当前图，previous仅供历史对照，旧确认不继承）：\n" + json.dumps(
+            assessment, ensure_ascii=False)
     if messages and messages[0]["role"] == "system":
         return [{**messages[0], "content": messages[0]["content"] + "\n" + content}, *messages[1:]]
     return [{"role": "system", "content": content}, *messages]
