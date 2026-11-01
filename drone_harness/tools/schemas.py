@@ -209,7 +209,7 @@ NAVIGATION_PLAN_TOOL_SCHEMA = {
                         "description": {"type": "string", "minLength": 1,
                                         "description": "本段完整导航任务及原文触发前提；无独立结束位置的前进与后续定位动作合并，方向参照不强加接近，不补造路线距离或固定转角。"},
                         "completion_condition": {"type": "string", "minLength": 1,
-                                                 "description": "整段全部动作后的可观察终态及所需依据；接近需当前目标有效实测≤20米，保留原文位置条件，不写完成该段前进、继续飞行或满足条件后降落。"},
+                                                 "description": "整段全部动作后的可观察终态及所需依据；接近需当前目标有效实测≤15米，保留原文位置条件，不写完成该段前进、继续飞行或满足条件后降落。"},
                         "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
                         "evidence": {"type": "string", "description": "实际动作、观察变化及所测目标与真实距离；不补造依据，不能可靠汇总时不写累计米数。可省略，已有目标沿用原依据，新目标为空。"},
                     },

@@ -11,11 +11,12 @@ import pytest
 import drone_harness.runtime.agent_loop as loop
 from drone_harness.llm.prompts import (
     LANDMARK_OBSERVATION_PROMPT, NAVIGATION_EXECUTION_PROMPT,
-    PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
+    PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT, build_system_prompt,
 )
 from drone_harness.runtime.navigation import parse_navigation_plan
 from drone_harness.runtime.runtime import _run_interactive_loop
 from drone_harness.runtime.safety import EndCurrentTurn
+from drone_harness.tools import flight
 from test_navigation_loop import (
     RecordingClient, assert_tool_pairs, messages, nav_context, observe_reply, planning_reply, reply,
 )
@@ -40,6 +41,31 @@ def test_prompt_injects_short_navigation_and_relation_rules(tmp_path):
         assert rule in prompt
     assert "先向左、向右旋转" not in prompt
     assert "skill" not in prompt and prompt.count('"target_status"') == 1
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_outgoing_prompt_and_plan_tool_share_fifteen_meter_standard(tmp_path, monkeypatch, terminal):
+    """实际普通及终点请求的提示和清单工具均使用十五米接近标准。"""
+    context = nav_context(tmp_path)
+    context.navigation_plan = parse_navigation_plan(plan_payload(statuses=(
+        "completed" if terminal else "in_progress",
+        "in_progress" if terminal else "pending")), "到路口，再到红门前降落")
+    history = messages()
+    history[0]["content"] = build_system_prompt(context.profile)
+    monkeypatch.setattr(flight, "land", lambda _context: {"success": True})
+    client = RecordingClient([reply("land")])
+    loop.agent_loop(client, "test", history, context)
+    assert len(client.requests) == 1
+    prompt = client.requests[0][0]["content"]
+    plan_tool = next(item["function"] for item in client.options[0]["tools"]
+                     if item["function"]["name"] == "update_navigation_plan")
+    description = plan_tool["parameters"]["properties"]["subgoals"]["items"]["properties"][
+        "completion_condition"]["description"]
+    assert "有效实测≤15米" in description
+    assert "distance_m≤15米" in prompt
+    assert "≤20米" not in prompt + description
+    if terminal:
+        assert "超过15米继续接近" in prompt and "当前有效实测≤15米" in prompt
 
 
 @pytest.mark.parametrize("enabled", [False, True])
