@@ -22,7 +22,7 @@ def terminal_context(tmp_path):
     context = nav_context(tmp_path)
     context.navigation_plan = parse_navigation_plan(
         plan_payload(statuses=("completed", "in_progress")), messages()[-1]["content"])
-    append_observation(context, [], snapshot_at(17.0))
+    append_observation(context, [], snapshot_at(14.0))
     return context
 
 
@@ -143,7 +143,7 @@ def test_original_loop_can_measure_update_and_land_without_extra_verification(tm
     assert first["arrival"] is None and first["latest_target_measurement"] is None
     assert second["arrival"]["position_status"] == "met"
     assert second["latest_target_measurement"]["valid"] is True
-    assert second["latest_target_measurement"]["distance_m"] <= 20
+    assert second["latest_target_measurement"]["distance_m"] <= 15
     assert second["latest_target_measurement"]["target"] == "红门实体表面"
     assert "arrival" not in second["target_assessment"]["current"]
     assert client.requests[1][0]["content"].count('"latest_target_measurement"') == 1

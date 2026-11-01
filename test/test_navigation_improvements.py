@@ -35,7 +35,7 @@ def test_prompt_injects_short_navigation_and_relation_rules(tmp_path):
                  "判断参照物被遮挡时，优先用 up 分步升高，每次后观察", "front、down 或 both",
                  "核对机下位置是否落入目标范围", "目标前后位置变化", "入口到出口的移动与边界变化",
                  "凡以接近作为子目标完成依据", "当前前视图中该目标的实体表面内部选点",
-                 "valid=true", "distance_m≤20米", "最终降落或悬停前",
+                 "valid=true", "distance_m≤15米", "最终降落或悬停前",
                  "常规前进无需先测距", "目标距离保持未知", "不按工具机械拆分"):
         assert rule in prompt
     assert "先向左、向右旋转" not in prompt
