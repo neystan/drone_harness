@@ -39,7 +39,7 @@ def test_prompt_injects_short_navigation_and_relation_rules(tmp_path):
                  "常规前进无需先测距", "目标距离保持未知", "不按工具机械拆分"):
         assert rule in prompt
     assert "先向左、向右旋转" not in prompt
-    assert "skill" not in prompt and "target_status" not in prompt
+    assert "skill" not in prompt and prompt.count('"target_status"') == 1
 
 
 @pytest.mark.parametrize("enabled", [False, True])

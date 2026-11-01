@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from drone_harness.config.schema import RuntimeProfile
 from drone_harness.skills import build_skills_index
 
@@ -42,13 +44,12 @@ measure_distance的选点坐标只对应前视图，不能使用下视图坐标�
 
 
 TERMINAL_COMPLETION_PROMPT = """终点阶段：末项尚未完成，先对照原始指令核对正确终点实例、部位与最终位置要求；处于本阶段不代表已经接近。
-同次看图回复的五字段JSON增加"arrival":{"position_status":"met|unmet|unknown","evidence":"当前图支持或不能确认位置关系的依据"}。该字段只判断原文朝向、侧向、上方或区域条件，met不表示身份正确、距离合格或任务完成；看不清用unknown，不填写自估距离。
+arrival只判断原文朝向、侧向、上方或区域条件，met不表示身份正确、距离合格或任务完成；看不清用unknown，不填写自估距离。
 根据当前终点依据处理缺口：有终点参照物时，身份存疑先区分候选，距离未知或无效则测正确目标部位，超过20米继续接近；位置条件未满足则调整。原文位置条件及所需的正确实例、部位与当前有效实测≤20米均有依据后，下一步更新清单完成，再按原指令降落或结束悬停；没有新矛盾不重复观察测量或继续飞离。
 """
 
 
 REFLECTION_PROMPT = """反思：普通观察与四向搜索共用。收到新图时，对照当前子目标与原指令，按“动作预期→工具实际反馈→新观察变化→完成条件”核对参照物外观、邻近关系、路线顺序、动作执行及位置。
-在同次看图回复开头输出一行JSON：{"target_status":"confirmed|uncertain|not_found","candidate":"候选特征、位置及所需部位","support":"支持依据","conflict":"已见矛盾","open_issue":"待核实问题"}，不加引导句或代码围栏；各项简短，无内容用空串，随后按需调用一个原生工具，不增加纯判断轮次。
 confirmed只表示身份已确认，不表示到位或完成；uncertain表示身份依据不足或仍有未消除的身份矛盾；not_found表示本次没找到，不代表不存在，candidate可为空。相似候选结合外观、邻接地标、道路关系及有观察和动作依据的路线顺序区分，说明为何选此候选而非相似物，允许均不符合。
 support写当前图支持身份的证据；从uncertain改为confirmed时，先说明本图新增什么证据消除了此前的身份疑点或矛盾。没有新增身份依据，不能因测距有效、距离变近或持续接近而升级确认。
 conflict只写与候选身份不符的已见事实；未看清及待核实问题写open_issue，方位偏差和位置条件不混作身份矛盾。open_issue聚焦下一步最需要区分的问题；四图说明候选相对扫描开始朝向的方向。
@@ -59,9 +60,29 @@ conflict只写与候选身份不符的已见事实；未看清及待核实问题
 """
 
 
+def build_reflection_output_format(terminal_stage: bool) -> str:
+    """生成当前阶段唯一完整的视觉判断格式。"""
+    example = {
+        "target_status": "confirmed|uncertain|not_found",
+        "candidate": "候选特征、位置及所需部位",
+        "support": "当前视觉支持身份及消除旧疑点的依据",
+        "conflict": "与候选身份不符的已见事实",
+        "open_issue": "下一步最需要区分的问题",
+    }
+    if terminal_stage:
+        example["arrival"] = {
+            "position_status": "met|unmet|unknown",
+            "evidence": "当前图支持或不能确认位置关系的依据",
+        }
+    return ("在同次看图回复开头输出一行JSON："
+            + json.dumps(example, ensure_ascii=False, separators=(",", ":"))
+            + "，不加引导句或代码围栏；各项简短，无内容用空串，随后按需调用一个原生工具，不增加纯判断轮次。")
+
+
 def build_system_prompt(profile: RuntimeProfile) -> str:
     """生成基础行为规则，仅为实机补充逐动作审批要求。"""
-    prompt = SYSTEM_PROMPT + REFLECTION_PROMPT + build_skills_index(profile.name)
+    prompt = (SYSTEM_PROMPT + REFLECTION_PROMPT + build_reflection_output_format(False)
+              + "\n" + build_skills_index(profile.name))
     if profile.mode == "real":
         return prompt + (
             "实机六种飞行动作每次均须人工确认；调用前先 observe，等待批准后执行。"

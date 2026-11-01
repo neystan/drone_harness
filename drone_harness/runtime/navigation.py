@@ -11,7 +11,7 @@ from drone_harness.llm.messages import assistant_history_message
 from drone_harness.llm.prompts import (
     LANDMARK_OBSERVATION_PROMPT, NAVIGATION_EXECUTION_PROMPT,
     PROXIMITY_COMPLETION_PROMPT, SPATIAL_COMPLETION_PROMPT,
-    TERMINAL_COMPLETION_PROMPT,
+    TERMINAL_COMPLETION_PROMPT, build_reflection_output_format,
 )
 from drone_harness.runtime.reflection import discard_stale_target_assessment
 from drone_harness.runtime.target_measurement import target_measurement_snapshot
@@ -190,9 +190,11 @@ def navigation_messages(messages: list[dict[str, Any]], plan: NavigationPlan | N
             {"latest_target_measurement": latest_target_measurement}, ensure_ascii=False)
         content += "\n参照物记录（均为模型判断；current对应当前图，previous仅供历史对照，旧确认不继承）：\n" + json.dumps(
             assessment, ensure_ascii=False)
+    output_format = build_reflection_output_format(plan is not None and plan.terminal_stage)
     if messages and messages[0]["role"] == "system":
-        return [{**messages[0], "content": messages[0]["content"] + "\n" + content}, *messages[1:]]
-    return [{"role": "system", "content": content}, *messages]
+        system_content = messages[0]["content"].replace(build_reflection_output_format(False), "", 1)
+        return [{**messages[0], "content": system_content + "\n" + output_format + "\n" + content}, *messages[1:]]
+    return [{"role": "system", "content": output_format + "\n" + content}, *messages]
 
 
 def compact_navigation_history(messages: list[dict[str, Any]], task_start: int,
