@@ -29,7 +29,8 @@ observation:
   depth_max_m: 30.0
   camera_forward_offset_m: 0.5
   body_front_offset_m: 0.55
-  body_half_width_m: 0.45
+  # 保守半宽叠加每侧0.15米余量，前进检测全宽1.5米。
+  body_half_width_m: 0.60
   body_half_height_m: 0.30
   measurement_margin_m: 0.15
   # 与测量 0.15m、延迟 0.25m 合计预留 1m 的计划净空；并非实测停距保证。

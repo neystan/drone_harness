@@ -110,6 +110,30 @@ def test_sim_thirty_meter_horizon_and_one_meter_planned_clearance() -> None:
     assert blocked_rules.forward_max_m == 0
 
 
+@pytest.mark.parametrize("column,in_corridor", [(2, True), (13, True), (0, False), (15, False)])
+def test_sim_wider_corridor_limits_side_edge_obstacles(column, in_corridor) -> None:
+    """新增横向覆盖能拦住两侧近障，包络以外仍不限制前进。"""
+    settings = Path(__file__).parents[1] / "settings.example.json"
+    profile = load_profile("sim", settings_path=settings)
+    config = profile.observation
+    source = snapshot_at(65504.0)
+    source = replace(source, intrinsics=replace(source.intrinsics, fx=32.0, fy=64.0))
+    depth = source.depth.copy()
+    depth[5, column] = 4.0
+    observation = replace(source, depth=depth)
+    old = compute_depth_rules(observation, replace(config, body_half_width_m=0.45),
+                              profile.forward_step_limit_m)
+    current = compute_depth_rules(observation, config, profile.forward_step_limit_m)
+    assert old.front_obstacle_m is None
+    assert current.depth_valid
+    if in_corridor:
+        assert 3.8 < current.front_obstacle_m < 4.0
+        assert current.forward_max_m < old.forward_max_m
+    else:
+        assert current.front_obstacle_m is None
+        assert current.forward_max_m == old.forward_max_m
+
+
 def test_nearer_obstacle_never_increases_forward_limit() -> None:
     """细小正前方障碍缩小上限而通道外障碍不改变前方净空。"""
     config = observation_config()
