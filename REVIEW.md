@@ -1,6 +1,6 @@
 # drone_harness 项目交接概览
 
-最后更新：2026-11-01（Asia/Shanghai）。当前待办见[STATUS.md](STATUS.md)，固定协作与文档维护规则见[AGENTS.md](/home/stan/AirVLN/AGENTS.md)。
+最后更新：2026-11-02（Asia/Shanghai）。当前待办见[STATUS.md](STATUS.md)，固定协作与文档维护规则见[AGENTS.md](/home/stan/AirVLN/AGENTS.md)。
 
 ## 项目目标与位置
 
@@ -74,6 +74,10 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 ## 数据与后续批测输入
 
+2026-11-02按用户指定位置，将三轮已有结果整理为一个[精选十例批次](/home/stan/AirVLN/drone_harness_runtime/batches/20261102-152212-331043-selected-ten/summary.md)：第一组`20261031-202315-602267`取第1/2例，第二组`20261101-162424-297321`取第2/3/4/5例，最后`20261101-210925-945239`取全部4例；顺序为229、328、412、397、485、486、29、403、351、354。独立评分SR=4/10、OSR=5/10，平均最终水平NE=27.8273米；328、412、485、486评分成功，351仅OSR成功。新目录沿用results.csv、summary.json/md及逐例目录，另有manifest/selection.csv和逐例source.json记录原批次、原位置、冻结提交与时限。录像、日志及原始评测以相对软链接引用，原始批次须保留；result只调整汇总路径并附来源，单例评分和其他原字段保持原值。复用现有汇总/绘图函数生成10张单图及1张总览，11张PNG解码和总览目视检查通过，86份关键来源文件前后SHA-256一致，顺序/去重/成绩逐项回验通过。[来源与版本](/home/stan/AirVLN/drone_harness_runtime/batches/20261102-152212-331043-selected-ten/manifest.json)、[校验记录](/home/stan/AirVLN/drone_harness_runtime/batches/20261102-152212-331043-selected-ten/validation.json)。
+
+该精选同时包含ca15a20（检测全宽1.2米、20米接近、50分钟）、73b0104（1.5米、系统15米/工具20米遗漏、40分钟）和df36475（1.5米、提示及工具15米、40分钟）三种运行条件；不是同一版本的新实验，不据合并后的统计推断单项优化效果。此次仅整理已有产物，未启动仿真、请求模型或重算单例评分；原始批次与完整历史证据保留。
+
 29、444、485的人工方向修订已写入`/home/stan/AirVLN_ws/DATA/data/aerialvln-s/val_unseen.json`：29两次左右互换、444首次右改左、485到箱体后45°右改左。全量531条对照及实际读取回验通过，仅三处instruction_text变化；编号、目标、参考轨迹及其他数据保持原样。[备份与变更证据](../drone_harness_runtime/analysis/20261024-oct19-review/dataset_instruction_update.json)
 
 历史通用`config/sim_batch.multi-scene-twelve.json`内容为11例：229、328、29、412、444、485、486、487、362、369、396，各一次、每条3000秒，中文回复、20FPS预览和录像；402只从后续配置排除，历史记录与数据集索引保留。十一例dry-run已通过，新启动读取修订输入，既有冻结批次不变。
@@ -88,7 +92,7 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 
 本次八例现已结算8/8：SR=3/8、OSR=3/8，412、485、486评分成功，平均最终水平NE=59.28米。[原始汇总](/home/stan/AirVLN/drone_harness_runtime/batches/20261101-162424-297321/summary.md)。该批冻结工具说明仍为20米，系统提示与工具说明冲突；后续漏改修复仅影响新启动，不据此回写历史结算或宣称本批验证了统一15米。
 
-当前八例配置第6位由488改为scene13的403：scene21四条均已测，用户排除487后明确授权其他场景未跑case；本地14批manifest和case目录未见403及其对应路线。此次仅按原位置1、替换位置6、原位置7/8的顺序运行29、403、351、354，各一次、每例2400秒；资产/顺序dry-run及ROS域42三节点通信退出通过。采用73724d2已推送的15米工具说明补修，正常启动不代表导航成功；冻结提交、进程、目录及首例实际验收见[本次运行记录](/home/stan/AirVLN/drone_harness_runtime/launches/20261101-210229-selected-case-rerun/launch.json)。
+最近四例使用的八例配置第6位由488改为scene13的403：scene21四条均已测，用户排除487后明确授权其他场景未跑case；本地14批manifest和case目录未见403及其对应路线。此次仅按原位置1、替换位置6、原位置7/8的顺序运行29、403、351、354，各一次、每例2400秒；资产/顺序dry-run及ROS域42三节点通信退出通过。采用73724d2已推送的15米工具说明补修，正常启动不代表导航成功；冻结提交、进程、目录及首例实际验收见[本次运行记录](/home/stan/AirVLN/drone_harness_runtime/launches/20261101-210229-selected-case-rerun/launch.json)。 该批已结算4/4，SR=0/4、OSR=1/4，平均最终NE=47.02米；29/351超时，403/354运行停止。[原始汇总](/home/stan/AirVLN/drone_harness_runtime/batches/20261101-210925-945239/summary.md)。
 
 ## 参照物记录与终点收尾（2026-10-31）
 
