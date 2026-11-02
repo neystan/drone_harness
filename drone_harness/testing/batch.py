@@ -308,9 +308,10 @@ def run_case(config: dict, episode: dict, index: int, root: Path, env: dict) -> 
     else:
         progress_path = scene_dir / "evaluation_progress.json"
         report = json.loads(progress_path.read_text()) if progress_path.is_file() else {
-            "metrics": {"NE": None, "SR": 0, "OSR": 0, "steps_taken": 0}}
+            "metrics": {"NE": None, "SR": 0, "OSR": 0, "SDTW": None}}
         report.update(status="incomplete", end_reason=reason)
         report["metrics"]["SR"] = 0
+        report["metrics"]["SDTW"] = None
         report["recovered_from_checkpoint"] = progress_path.is_file()
         write_json(report_path, report)
     runtime = json.loads(runtime_result.read_text()) if runtime_result.is_file() else {}
@@ -358,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run([config["ros_python"], "-c",
             "import rclpy,cv_bridge,cv2,numpy; from PIL import ImageFont; "
             "from drone_harness.config.loader import load_profile; load_profile('sim')"], env=env, check=True)
+        subprocess.run([config["airsim_python"], "-c", "import fastdtw,numpy"], env=env, check=True)
         if config["record"]:
             subprocess.run([config["ros_python"], "-c",
                 "from drone_harness.testing.video import ffmpeg_executable; import subprocess; "

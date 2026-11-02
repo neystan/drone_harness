@@ -52,6 +52,7 @@ def log_tool_call(
     """记录一次工具调用及其结果。"""
     event = {
         "timestamp": _timestamp(),
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "profile_name": profile.name,
         "event_type": "tool_call",
         "tool_name": tool_name,

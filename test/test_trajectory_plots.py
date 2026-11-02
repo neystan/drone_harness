@@ -24,7 +24,7 @@ def result(index=0, attempt=1, cycle=1):
     """提供已结算的指标和独立尝试身份。"""
     return {"case_index": index, "scene_id": 9 + index, "episode_id": f"ep-{index}",
             "attempt": attempt, "cycle": cycle, "NE": 5.0, "SR": 0, "OSR": 1,
-            "steps_taken": 3, "status": "incomplete", "end_reason": "case_timeout"}
+            "SDTW": 0.0, "status": "incomplete", "end_reason": "case_timeout"}
 
 
 def write_attempt(root, row):

@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-METRICS = ("NE", "SR", "OSR", "steps_taken")
+METRICS = ("NE", "SR", "OSR", "SDTW")
 SUPPORTED_SCENES = {9, 13, 21, 24}
 
 
@@ -79,8 +79,7 @@ def means(rows: list[dict]) -> dict:
         result[name] = sum(values) / len(values) if values else None
         result[name + "_valid_count"] = len(values)
     result["NE_missing_count"] = len(rows) - result["NE_valid_count"]
-    successful = [row["steps_taken"] for row in rows if row.get("SR") == 1]
-    result["steps_on_success"] = sum(successful) / len(successful) if successful else None
+    result["SDTW_missing_count"] = len(rows) - result["SDTW_valid_count"]
     return result
 
 
@@ -99,12 +98,13 @@ def save_summary(root: Path, rows: list[dict], planned: int, status: str) -> Non
                           for value in sorted({row[key] for row in rows})}
     write_json(root / "summary.json", summary)
     lines = ["# 仿真批测结果", "", f"状态：{status}；已完成 {len(rows)}/{planned} 次尝试。", "",
-             "| 范围 | 次数 | NE ↓ | SR ↑ | OSR ↑ | steps_taken |", "|---|---:|---:|---:|---:|---:|"]
+             "| 范围 | 次数 | NE ↓ | SR ↑ | OSR ↑ | SDTW ↑ |", "|---|---:|---:|---:|---:|---:|"]
     for label, group in [("全部", means(rows)), *[(f"循环 {k}", v) for k, v in summary["by_cycle"].items()]]:
         values = ["缺失" if group[name] is None else f"{group[name]:.4f}" for name in METRICS]
         lines.append(f"| {label} | {group['attempts']} | " + " | ".join(values) + " |")
-    lines += ["", f"NE 缺失次数：{summary['overall']['NE_missing_count']}。失败尝试保留实际 OSR 和步数。",
-              "SR/OSR 为 0–1 均值；steps_taken 同时包含失败尝试，成功样本均值另见 summary.json。"]
+    lines += ["", f"NE 缺失次数：{summary['overall']['NE_missing_count']}。失败尝试保留实际 OSR。",
+              f"SDTW 缺失次数：{summary['overall']['SDTW_missing_count']}。缺失不按零分计入均值。",
+              "SR/OSR/SDTW 为 0–1 均值；SDTW 使用飞行动作终点的世界三维轨迹，失败且轨迹有效时为0。"]
     if (root / "trajectory_comparison.png").is_file():
         lines += ["", "[轨迹总览](trajectory_comparison.png)"]
     case_links = []

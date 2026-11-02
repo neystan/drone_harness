@@ -64,9 +64,9 @@ def test_invalid_or_depth_excluded_selection_fails_before_launch(selection):
 
 
 def test_summary_keeps_failed_attempts_and_missing_ne_visible(tmp_path):
-    rows = [{"cycle": 1, "case_index": 0, "scene_id": 9, "NE": 2.0, "SR": 1, "OSR": 1, "steps_taken": 10},
-            {"cycle": 1, "case_index": 1, "scene_id": 24, "NE": None, "SR": 0, "OSR": 0, "steps_taken": 2},
-            {"cycle": 2, "case_index": 0, "scene_id": 9, "NE": 30.0, "SR": 0, "OSR": 1, "steps_taken": 12}]
+    rows = [{"cycle": 1, "case_index": 0, "scene_id": 9, "NE": 2.0, "SR": 1, "OSR": 1, "SDTW": 0.8},
+            {"cycle": 1, "case_index": 1, "scene_id": 24, "NE": None, "SR": 0, "OSR": 0, "SDTW": None},
+            {"cycle": 2, "case_index": 0, "scene_id": 9, "NE": 30.0, "SR": 0, "OSR": 1, "SDTW": 0.0}]
     save_summary(tmp_path, rows, 4, "stopped")
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["finished_attempts"] == 3
@@ -74,6 +74,10 @@ def test_summary_keeps_failed_attempts_and_missing_ne_visible(tmp_path):
     assert summary["overall"]["OSR"] == pytest.approx(2 / 3)
     assert summary["overall"]["NE"] == 16
     assert summary["overall"]["NE_missing_count"] == 1
+    assert summary["overall"]["SDTW"] == pytest.approx(0.4)
+    assert summary["overall"]["SDTW_missing_count"] == 1
+    assert "steps_on_success" not in summary["overall"]
+    assert "steps_taken" not in (tmp_path / "results.csv").read_text()
     assert summary["by_case"]["0"]["attempts"] == 2
     assert summary["by_cycle"]["1"]["SR"] == 0.5
     assert (tmp_path / "results.csv").is_file()
@@ -149,7 +153,7 @@ def test_runtime_stop_finalizes_before_process_cleanup(tmp_path, monkeypatch, co
                 write_json(self.root / "scene/evaluation.json", {
                     "status": "completed" if completed else "incomplete",
                     "end_reason": "successful_land" if completed else "runtime_stopped",
-                    "metrics": {"NE": 1.0 if completed else 31.0, "SR": int(completed), "OSR": 1, "steps_taken": 7}})
+                    "metrics": {"NE": 1.0 if completed else 31.0, "SR": int(completed), "OSR": 1, "SDTW": 0.75}})
                 events.append("scored")
             self.returncode = 0
             return 0
@@ -166,7 +170,7 @@ def test_runtime_stop_finalizes_before_process_cleanup(tmp_path, monkeypatch, co
     assert "999" not in (tmp_path / "attempt/instruction.txt").read_text()
     assert result["end_reason"] == ("successful_land" if completed else "runtime_stopped")
     assert result["SR"] == int(completed)
-    assert result["OSR"] == 1 and result["steps_taken"] == 7
+    assert result["OSR"] == 1 and result["SDTW"] == 0.75
     assert not result["halt_batch"]
     assert events.index("scored") < events.index("stop_scene")
 
@@ -184,7 +188,7 @@ def test_evaluation_finishes_before_runtime_without_false_timeout(tmp_path, monk
                                 "Ready for takeoff!\n" if self.name == "px4" else "")
             if self.name == "agent":
                 write_json(self.root / "scene/evaluation.json", {"status": "completed",
-                    "end_reason": "successful_land", "metrics": {"NE": 1.0, "SR": 1, "OSR": 1, "steps_taken": 4}})
+                    "end_reason": "successful_land", "metrics": {"NE": 1.0, "SR": 1, "OSR": 1, "SDTW": 0.5}})
         def poll(self):
             return self.returncode
         def wait(self, timeout):
@@ -220,7 +224,7 @@ def test_missing_final_report_recovers_saved_checkpoint(tmp_path, monkeypatch):
             if self.name == "scene":
                 write_json(self.root / "scene/evaluation_progress.json", {
                     "status": "incomplete", "end_reason": "running",
-                    "metrics": {"NE": 12.0, "SR": 1, "OSR": 1, "steps_taken": 4}})
+                    "metrics": {"NE": 12.0, "SR": 1, "OSR": 1, "SDTW": 0.5}})
         def poll(self):
             return 1 if self.name == "agent" else None
         def wait(self, timeout):
@@ -237,7 +241,7 @@ def test_missing_final_report_recovers_saved_checkpoint(tmp_path, monkeypatch):
     assert report["recovered_from_checkpoint"] is True
     assert result["end_reason"] == "agent_process_exited"
     assert result["NE"] == 12.0 and result["SR"] == 0
-    assert result["OSR"] == 1 and result["steps_taken"] == 4
+    assert result["OSR"] == 1 and result["SDTW"] is None
 
 
 @pytest.mark.parametrize("end_reason", ["runtime_stopped", "case_timeout"])
@@ -256,7 +260,7 @@ def test_repeats_whole_selection_and_advances_after_failure(tmp_path, monkeypatc
         order.append(index)
         return {"case_index": index, "scene_id": int(episode["scene_id"]), "episode_id": episode["episode_id"],
                 "status": "incomplete", "end_reason": end_reason, "NE": 30, "SR": 0, "OSR": 1,
-                "steps_taken": 2, "halt_batch": False}
+                "SDTW": None, "halt_batch": False}
     monkeypatch.setattr(batch, "run_case", run_case)
     plotted = []
 
@@ -402,7 +406,7 @@ if name == "scene":
     reason=json.loads(source.read_text())["end_reason"]
     (root/"scene").mkdir(exist_ok=True)
     (root/"scene/evaluation.json").write_text(json.dumps({"status":"incomplete","end_reason":reason,
-        "metrics":{"NE":42,"SR":0,"OSR":1,"steps_taken":3}}))
+        "metrics":{"NE":42,"SR":0,"OSR":1,"SDTW":0.0}}))
 elif name == "agent":
     time.sleep(.1)
     if sys.argv[3] == "normal":
@@ -426,6 +430,6 @@ else:
     config = {**batch.DEFAULTS, "record": False, "preview": False, "case_timeout_s": 1 if mode == "timeout" else 3}
     result = batch.run_case(config, episodes()[0], 0, tmp_path / "attempt", {"PATH": "/usr/bin"})
     assert result["end_reason"] == {"normal": "runtime_stopped", "crash": "agent_process_exited", "timeout": "case_timeout"}[mode]
-    assert result["NE"] == 42 and result["OSR"] == 1 and result["steps_taken"] == 3
+    assert result["NE"] == 42 and result["OSR"] == 1 and result["SDTW"] == 0.0
     assert not result["halt_batch"]
     assert all(process.process.poll() is not None for process in children)
