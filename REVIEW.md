@@ -1,6 +1,6 @@
 # drone_harness 项目交接概览
 
-最后更新：2026-11-02（Asia/Shanghai）。当前待办见[STATUS.md](STATUS.md)，固定协作与文档维护规则见[AGENTS.md](/home/stan/AirVLN/AGENTS.md)。
+最后更新：2026-11-05（Asia/Shanghai）。当前待办见[STATUS.md](STATUS.md)，固定协作与文档维护规则见[AGENTS.md](/home/stan/AirVLN/AGENTS.md)。
 
 ## 项目目标与位置
 
@@ -85,6 +85,10 @@ sim/real 入口分别为 `drone_harness_sim`、`drone_harness_real`。批测入�
 阶段1飞行闭环与阶段2长指令/清单管理均已实现。阶段1包括悬停恢复、升降、按需观察、前进深度限制、状态查询和动作后等待；阶段2包括同模型工具规划、任务续接、有限纠错和上下文管理。后续已完成项目如下，保留各次实际实现与验证结果；待改内容仅在STATUS.md列出。
 
 ## 数据与后续批测输入
+
+本地资产保留范围（2026-11-05）：已清理`/home/stan/AirVLN/offline_packages`和`/home/stan/AirVLN_ws/downloads`中的离线安装材料，以及pip和VS Code扩展安装包缓存，本次释放约9.01 GiB。当前PX4、ROS工作区、Python环境与实际数据集独立保留；后续离线重装不能再依赖上述两个目录。系统journal与已禁用的旧Snap仍受管理员权限限制，当前状态见STATUS.md。
+
+2026-10-08和2026-10-11四个批次中的27份`flight.mp4`已删除，占用2.389 GiB；成绩、日志、时间线、已有图片和冻结源码保留，原录像现已不可回放。清理后其余5467份文件的大小、修改时间与inode保持一致，其中5383份非录像文件SHA-256一致；203个软链接全部有效，精选十例的10份录像及其来源保留。既有复盘结论和证据定位继续保留，录像抽查属于删除前的历史验证。
 
 2026-11-02按用户指定位置，将三轮已有结果整理为一个[精选十例批次](/home/stan/AirVLN/drone_harness_runtime/batches/20261102-152212-331043-selected-ten/summary.md)：第一组`20261031-202315-602267`取第1/2例，第二组`20261101-162424-297321`取第2/3/4/5例，最后`20261101-210925-945239`取全部4例；顺序为229、328、412、397、485、486、29、403、351、354。独立评分SR=4/10、OSR=5/10，平均最终水平NE=27.8273米；328、412、485、486评分成功，351仅OSR成功。新目录沿用results.csv、summary.json/md及逐例目录，另有manifest/selection.csv和逐例source.json记录原批次、原位置、冻结提交与时限。录像、日志及原始评测以相对软链接引用，原始批次须保留；result只调整汇总路径并附来源，单例评分和其他原字段保持原值。复用现有汇总/绘图函数生成10张单图及1张总览，11张PNG解码和总览目视检查通过，86份关键来源文件前后SHA-256一致，顺序/去重/成绩逐项回验通过。[来源与版本](/home/stan/AirVLN/drone_harness_runtime/batches/20261102-152212-331043-selected-ten/manifest.json)、[校验记录](/home/stan/AirVLN/drone_harness_runtime/batches/20261102-152212-331043-selected-ten/validation.json)。
 
